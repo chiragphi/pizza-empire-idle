@@ -5,617 +5,975 @@ export interface SceneState {
   buildingStage: number;
   workerCounts: Record<string, number>;
   particles: Particle[];
-  dayNightPhase: number; // 0=day 1=night
+  dayNightPhase: number; // 0 = day, 1 = midnight
 }
 
-// ── Utilities ─────────────────────────────────────────────
+// ── tiny helpers ─────────────────────────────────────────
 
-function rr(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, w: number, h: number, r = 6
-) {
+function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r = 5) {
+  const R = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.moveTo(x + R, y);
+  ctx.lineTo(x + w - R, y);
+  ctx.arcTo(x + w, y, x + w, y + R, R);
+  ctx.lineTo(x + w, y + h - R);
+  ctx.arcTo(x + w, y + h, x + w - R, y + h, R);
+  ctx.lineTo(x + R, y + h);
+  ctx.arcTo(x, y + h, x, y + h - R, R);
+  ctx.lineTo(x, y + R);
+  ctx.arcTo(x, y, x + R, y, R);
   ctx.closePath();
 }
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
 
-function hexRgb(hex: string): [number, number, number] {
-  const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return r ? [parseInt(r[1], 16), parseInt(r[2], 16), parseInt(r[3], 16)] : [0, 0, 0];
+function hexRgb(h: string): [number, number, number] {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
 }
-
-function lerpColor(a: string, b: string, t: number): string {
+function lerpHex(a: string, b: string, t: number): string {
   const [ar, ag, ab] = hexRgb(a);
   const [br, bg, bb] = hexRgb(b);
   return `rgb(${Math.round(lerp(ar, br, t))},${Math.round(lerp(ag, bg, t))},${Math.round(lerp(ab, bb, t))})`;
 }
 
-// ── Main draw ─────────────────────────────────────────────
+// ── main entry ───────────────────────────────────────────
 
 export function drawScene(
   ctx: CanvasRenderingContext2D,
   W: number, H: number,
   scene: SceneState
 ) {
-  const { time, buildingStage, workerCounts, particles, dayNightPhase: p } = scene;
+  const { time, buildingStage, workerCounts, particles, dayNightPhase: dn } = scene;
 
-  drawSky(ctx, W, H, p, time);
-  drawBackgroundCity(ctx, W, H, p, time);
-  drawStreet(ctx, W, H);
-  drawBuilding(ctx, W, H, buildingStage, time, p);
-  drawWorkers(ctx, W, H, workerCounts, time, buildingStage);
-  drawForeground(ctx, W, H, time, buildingStage);
+  ctx.clearRect(0, 0, W, H);
 
-  for (const pt of particles) drawParticle(ctx, pt);
+  // Layout constants (everything relative to canvas size)
+  const groundY = H * 0.68;   // where the sidewalk starts
+  const horizonY = H * 0.45;  // visual horizon line
+
+  drawSky(ctx, W, H, groundY, dn, time);
+  drawDistantBuildings(ctx, W, H, groundY, horizonY, dn, time);
+  drawGround(ctx, W, H, groundY);
+  drawRestaurant(ctx, W, H, groundY, horizonY, buildingStage, dn, time);
+  drawStreetElements(ctx, W, H, groundY, time, dn, buildingStage);
+  drawWorkers(ctx, W, H, groundY, workerCounts, time, buildingStage);
+
+  for (const p of particles) drawParticle(ctx, p);
 }
 
-// ── SKY ───────────────────────────────────────────────────
+// ── SKY ──────────────────────────────────────────────────
 
-function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, p: number, time: number) {
-  // Sky gradient
-  const skyA = lerpColor("#1c4a6e", "#0d1520", p);
-  const skyB = lerpColor("#2a6a9a", "#111e30", p);
-  const g = ctx.createLinearGradient(0, 0, 0, H * 0.65);
-  g.addColorStop(0, skyA);
-  g.addColorStop(1, skyB);
+function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, groundY: number, dn: number, time: number) {
+  // Gradient: warm blue day → deep indigo night
+  const topDay   = "#1a5280";
+  const topNight = "#06091a";
+  const botDay   = "#4a8ab0";
+  const botNight = "#0e1535";
+
+  const g = ctx.createLinearGradient(0, 0, 0, groundY);
+  g.addColorStop(0, lerpHex(topDay, topNight, dn));
+  g.addColorStop(1, lerpHex(botDay, botNight, dn));
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, W, groundY);
 
-  // Sun
-  if (p < 0.6) {
-    const sunAlpha = Math.max(0, 1 - p * 2);
-    const sunX = W * 0.78;
-    const sunY = H * 0.12;
-    const sg = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 50);
-    sg.addColorStop(0, `rgba(255,230,100,${sunAlpha})`);
-    sg.addColorStop(0.5, `rgba(255,180,50,${sunAlpha * 0.4})`);
-    sg.addColorStop(1, "rgba(255,180,50,0)");
-    ctx.fillStyle = sg;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 50, 0, Math.PI * 2);
-    ctx.fill();
-    // disc
-    ctx.fillStyle = `rgba(255,240,130,${sunAlpha})`;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 18, 0, Math.PI * 2);
-    ctx.fill();
+  // Stars — only at night
+  if (dn > 0.3) {
+    const sa = clamp((dn - 0.3) / 0.4, 0, 1);
+    const stars: [number, number, number][] = [
+      [0.06,0.06,1.2],[0.14,0.14,1],[0.22,0.05,1.4],[0.31,0.2,1],[0.4,0.08,1.3],
+      [0.49,0.17,1],[0.58,0.06,1.2],[0.68,0.22,1.1],[0.77,0.1,1.4],[0.86,0.05,1],
+      [0.92,0.18,1.2],[0.97,0.1,1],[0.35,0.28,0.9],[0.55,0.3,1.1],[0.73,0.28,0.9],
+      [0.19,0.3,1],[0.85,0.28,1],[0.5,0.06,1.3],[0.12,0.32,0.8],[0.65,0.14,1],
+    ];
+    for (const [sx, sy, sr] of stars) {
+      const tw = 0.5 + 0.5 * Math.sin(time * 1.4 + sx * 20 + sy * 30);
+      ctx.fillStyle = `rgba(255,255,255,${sa * tw * 0.85})`;
+      ctx.beginPath();
+      ctx.arc(sx * W, sy * groundY, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
-  // Moon
-  if (p > 0.45) {
-    const moonAlpha = Math.min(1, (p - 0.45) / 0.25);
-    const mx = W * 0.82, my = H * 0.1;
+  // Moon at night
+  if (dn > 0.4) {
+    const ma = clamp((dn - 0.4) / 0.3, 0, 1);
+    const mx = W * 0.84, my = groundY * 0.15;
     ctx.save();
-    ctx.globalAlpha = moonAlpha;
-    ctx.fillStyle = "#e8e0c8";
-    ctx.shadowColor = "#e8e0c8";
-    ctx.shadowBlur = 16;
+    ctx.globalAlpha = ma;
+    ctx.fillStyle = "#ddd8c0";
+    ctx.shadowColor = "#ddd8c0";
+    ctx.shadowBlur = 18;
     ctx.beginPath();
-    ctx.arc(mx, my, 18, 0, Math.PI * 2);
+    ctx.arc(mx, my, 16, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    // Crescent
+    // crescent shadow
     ctx.globalCompositeOperation = "destination-out";
     ctx.fillStyle = "rgba(0,0,0,0.96)";
     ctx.beginPath();
-    ctx.arc(mx + 10, my - 4, 16, 0, Math.PI * 2);
+    ctx.arc(mx + 9, my - 3, 14, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
   }
 
-  // Stars
-  if (p > 0.35) {
-    const starAlpha = Math.min(0.9, (p - 0.35) / 0.25);
-    const stars = [
-      [0.08,0.04],[0.18,0.1],[0.3,0.03],[0.45,0.07],[0.6,0.05],
-      [0.72,0.13],[0.88,0.06],[0.94,0.1],[0.25,0.18],[0.55,0.2],
-      [0.38,0.15],[0.5,0.22],[0.15,0.22],[0.65,0.18],[0.04,0.25],
-      [0.78,0.02],[0.35,0.09],[0.62,0.15],[0.42,0.19],[0.9,0.17],
-    ];
-    for (const [sx, sy] of stars) {
-      const twinkle = 0.5 + Math.sin(time * 1.8 + sx * 30) * 0.4;
-      ctx.fillStyle = `rgba(255,255,255,${starAlpha * twinkle})`;
-      ctx.beginPath();
-      ctx.arc(sx * W, sy * H * 0.65, 1.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  // Sun at day
+  if (dn < 0.5) {
+    const sa = clamp(1 - dn * 2.5, 0, 1);
+    const sx = W * 0.8, sy = groundY * 0.16;
+    const sg = ctx.createRadialGradient(sx, sy, 0, sx, sy, 55);
+    sg.addColorStop(0, `rgba(255,235,100,${sa})`);
+    sg.addColorStop(0.45, `rgba(255,195,50,${sa * 0.35})`);
+    sg.addColorStop(1, "rgba(255,195,50,0)");
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,245,160,${sa})`;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 16, 0, Math.PI * 2);
+    ctx.fill();
   }
+
+  // Horizon glow (always present, warmer at dusk)
+  const glowAlpha = 0.25 + 0.2 * Math.sin(dn * Math.PI);
+  const hg = ctx.createLinearGradient(0, groundY - H * 0.18, 0, groundY);
+  hg.addColorStop(0, "rgba(255,140,60,0)");
+  hg.addColorStop(1, `rgba(255,140,60,${glowAlpha})`);
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, groundY - H * 0.18, W, H * 0.18);
 }
 
-// ── BACKGROUND CITY ───────────────────────────────────────
+// ── DISTANT BUILDINGS ─────────────────────────────────────
 
-function drawBackgroundCity(ctx: CanvasRenderingContext2D, W: number, H: number, p: number, time: number) {
-  const bldgColor = lerpColor("#1e3050", "#111e30", p);
-  const winColor = p > 0.3 ? `rgba(255,210,90,${Math.min(0.7, (p - 0.3) * 1.5)})` : null;
+function drawDistantBuildings(
+  ctx: CanvasRenderingContext2D,
+  W: number, H: number,
+  groundY: number, horizonY: number,
+  dn: number, time: number
+) {
+  const bldgColor = lerpHex("#1e3050", "#0a0f1e", dn);
+  const winAlpha  = clamp((dn - 0.2) / 0.4, 0, 0.75);
 
-  const buildings = [
-    [0,55,90],[45,48,100],[85,52,130],[135,58,95],[175,55,145],
-    [240,62,115],[285,58,90],[325,56,135],[380,50,100],[W*0.7,55,120],
-    [W*0.78,52,90],[W*0.84,50,110],[W*0.91,58,80],[W*0.95,55,70],
-  ] as [number, number, number][];
+  // Buildings: [x_fraction, width, height_above_ground]
+  const bldgs: [number, number, number][] = [
+    [0, 52, 110], [0.04, 40, 90], [0.09, 62, 140],
+    [0.16, 48, 105], [0.22, 70, 160], [0.31, 44, 120],
+    [0.37, 55, 95], [0.43, 45, 130],
+    // right side (restaurant takes center ~0.22–0.7 so bg buildings on sides)
+    [0.72, 50, 110], [0.77, 65, 145], [0.84, 48, 100],
+    [0.88, 72, 130], [0.93, 50, 90], [0.97, 42, 115],
+  ];
 
-  for (const [bx, bw, bh] of buildings) {
-    const by = H * 0.62 - bh;
+  // Draw silhouettes
+  for (const [xf, bw, bh] of bldgs) {
+    const bx = xf * W;
+    const by = groundY - bh;
     ctx.fillStyle = bldgColor;
     ctx.fillRect(bx, by, bw, bh);
 
-    // Windows
-    if (winColor) {
-      ctx.fillStyle = winColor;
-      const cols = Math.floor(bw / 13);
-      const rows = Math.floor(bh / 15);
+    // Night windows
+    if (winAlpha > 0) {
+      const cols = Math.floor(bw / 11);
+      const rows = Math.floor(bh / 13);
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          if (Math.sin(bx * 0.1 + r * 5.3 + c * 11.7) > 0.15) {
-            ctx.fillRect(bx + 4 + c * 13, by + 5 + r * 15, 7, 8);
-          }
+          const on = Math.sin(xf * 100 + r * 7.3 + c * 13.1) > 0.05;
+          if (!on) continue;
+          const blink = 0.6 + 0.4 * Math.sin(time * 0.3 + xf * 50 + r * 4 + c * 9);
+          ctx.fillStyle = `rgba(255,210,90,${winAlpha * blink})`;
+          ctx.fillRect(bx + 3 + c * 11, by + 4 + r * 13, 6, 7);
         }
       }
     }
   }
 
-  // Distant hills / ground fade
-  const hillG = ctx.createLinearGradient(0, H * 0.55, 0, H * 0.65);
-  hillG.addColorStop(0, lerpColor("#1e3848", "#0d1a28", p));
-  hillG.addColorStop(1, lerpColor("#1a3040", "#0d1520", p));
-  ctx.fillStyle = hillG;
-  ctx.fillRect(0, H * 0.55, W, H * 0.1);
+  // Thin horizon line
+  ctx.fillStyle = lerpHex("#1a3850", "#08101e", dn);
+  ctx.fillRect(0, groundY - 4, W, 4);
+
+  // Avoid unused warning
+  void horizonY;
 }
 
-// ── STREET ────────────────────────────────────────────────
+// ── GROUND / STREET ───────────────────────────────────────
 
-function drawStreet(ctx: CanvasRenderingContext2D, W: number, H: number) {
-  const groundY = H * 0.62;
-
+function drawGround(ctx: CanvasRenderingContext2D, W: number, H: number, groundY: number) {
   // Sidewalk
-  ctx.fillStyle = "#8a7e72";
-  ctx.fillRect(0, groundY, W, H * 0.1);
+  const swH = H * 0.1;
+  ctx.fillStyle = "#706860";
+  ctx.fillRect(0, groundY, W, swH);
 
-  // Sidewalk tiles
-  ctx.strokeStyle = "rgba(0,0,0,0.15)";
-  ctx.lineWidth = 0.5;
-  for (let x = 0; x < W; x += 48) {
+  // Sidewalk tile grid
+  ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.lineWidth = 0.6;
+  for (let x = 0; x < W; x += 50) {
+    ctx.beginPath(); ctx.moveTo(x, groundY); ctx.lineTo(x, groundY + swH); ctx.stroke();
+  }
+  for (let y = groundY; y < groundY + swH; y += 25) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Curb edge
+  ctx.fillStyle = "#504840";
+  ctx.fillRect(0, groundY + swH - 3, W, 6);
+
+  // Road
+  const roadY = groundY + swH + 3;
+  ctx.fillStyle = "#1e1c1a";
+  ctx.fillRect(0, roadY, W, H - roadY);
+
+  // Road surface texture (subtle)
+  ctx.fillStyle = "rgba(255,255,255,0.02)";
+  for (let x = 0; x < W; x += 80) {
+    ctx.fillRect(x, roadY, 40, H - roadY);
+  }
+
+  // Center dashes
+  const dashY = roadY + (H - roadY) * 0.45;
+  ctx.strokeStyle = "#c09030";
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([36, 24]);
+  ctx.beginPath();
+  ctx.moveTo(0, dashY);
+  ctx.lineTo(W, dashY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ── RESTAURANT BUILDING ───────────────────────────────────
+
+function drawRestaurant(
+  ctx: CanvasRenderingContext2D,
+  W: number, H: number,
+  groundY: number, _horizonY: number,
+  stage: number, dn: number, time: number
+) {
+  // Restaurant is centered, width grows with stage
+  const widths  = [200, 260, 340, 440];
+  const heights = [160, 220, 290, 360];
+  const bw = widths[stage];
+  const bh = heights[stage];
+  const bx = (W - bw) / 2;
+  const by = groundY - bh;
+
+  if (stage === 0) drawKiosk(ctx, bx, by, bw, bh, dn, time);
+  else if (stage === 1) drawSmallShop(ctx, bx, by, bw, bh, dn, time);
+  else if (stage === 2) drawRestaurantFacade(ctx, bx, by, bw, bh, dn, time);
+  else drawFranchiseTower(ctx, bx, by, bw, bh, W, dn, time);
+}
+
+// ── Stage 0: Street kiosk ──────────────────────────────
+
+function drawKiosk(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  dn: number, time: number
+) {
+  // Base body
+  ctx.fillStyle = "#b89a6a";
+  rr(ctx, x, y + 28, w, h - 28, 4);
+  ctx.fill();
+  ctx.strokeStyle = "#7a6840";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  rr(ctx, x, y + 28, w, h - 28, 4);
+  ctx.stroke();
+
+  // Striped awning
+  const aw = w + 32, ah = 36;
+  const ax = x - 16;
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = i % 2 === 0 ? "#c02828" : "#e04040";
+    ctx.fillRect(ax + i * (aw / 6), y, aw / 6, ah);
+  }
+  // Awning bottom edge (scallop row)
+  ctx.fillStyle = "#c02828";
+  for (let i = 0; i < 7; i++) {
     ctx.beginPath();
-    ctx.moveTo(x, groundY);
-    ctx.lineTo(x, groundY + H * 0.1);
+    ctx.arc(ax + i * (aw / 6.5) + 10, y + ah, 10, 0, Math.PI);
+    ctx.fill();
+  }
+
+  // Counter
+  ctx.fillStyle = "#7a5c2e";
+  ctx.fillRect(x, y + h - 28, w, 28);
+  // Counter trim
+  ctx.fillStyle = "#5a4020";
+  ctx.fillRect(x, y + h - 30, w, 4);
+
+  // Sign board (horizontal rectangle - NOT a circle)
+  drawSignBoard(ctx, x + w / 2, y - 18, w - 24, 34, "PIZZA STAND", dn, time);
+
+  // Chimney smoke
+  drawSmoke(ctx, x + w - 35, y + 28, time, 0.25);
+}
+
+// ── Stage 1: Small shop ────────────────────────────────
+
+function drawSmallShop(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  dn: number, time: number
+) {
+  // Roof (sloped suggestion)
+  ctx.fillStyle = "#6a2c10";
+  ctx.beginPath();
+  ctx.moveTo(x - 12, y + 22);
+  ctx.lineTo(x + w / 2, y);
+  ctx.lineTo(x + w + 12, y + 22);
+  ctx.lineTo(x + w + 12, y + 30);
+  ctx.lineTo(x - 12, y + 30);
+  ctx.closePath();
+  ctx.fill();
+
+  // Main wall
+  ctx.fillStyle = "#d4b07a";
+  rr(ctx, x, y + 22, w, h - 22, 6);
+  ctx.fill();
+  ctx.strokeStyle = "#8a6830";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  rr(ctx, x, y + 22, w, h - 22, 6);
+  ctx.stroke();
+
+  // Facade detail (horizontal plank lines)
+  ctx.strokeStyle = "rgba(100,70,30,0.18)";
+  ctx.lineWidth = 1;
+  for (let fy = y + 40; fy < y + h - 10; fy += 20) {
+    ctx.beginPath();
+    ctx.moveTo(x + 4, fy);
+    ctx.lineTo(x + w - 4, fy);
     ctx.stroke();
   }
 
-  // Road
-  ctx.fillStyle = "#252220";
-  ctx.fillRect(0, groundY + H * 0.1, W, H * 0.28);
+  // Left window
+  drawWindow(ctx, x + 18, y + h - 105, 60, 70, dn, time);
+  // Right window
+  drawWindow(ctx, x + w - 78, y + h - 105, 60, 70, dn, time);
 
-  // Road center line
-  ctx.strokeStyle = "#c8a040";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([32, 22]);
-  ctx.beginPath();
-  ctx.moveTo(0, groundY + H * 0.18);
-  ctx.lineTo(W, groundY + H * 0.18);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // Door (centered)
+  drawDoor(ctx, x + w / 2 - 22, y + h - 80, 44, 80);
 
-  // Curb
-  ctx.fillStyle = "#5a5248";
-  ctx.fillRect(0, groundY + H * 0.098, W, 4);
+  // Awning strip above door
+  ctx.fillStyle = "#b82020";
+  ctx.fillRect(x + w / 2 - 55, y + h - 100, 110, 16);
+  // Awning underside shadow
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(x + w / 2 - 55, y + h - 86, 110, 4);
+
+  // Sign board
+  drawSignBoard(ctx, x + w / 2, y - 8, w - 14, 38, "PIZZA EMPIRE", dn, time);
+
+  drawSmoke(ctx, x + w - 40, y + 22, time, 0.3);
 }
 
-// ── BUILDING ──────────────────────────────────────────────
+// ── Stage 2: Full restaurant ───────────────────────────
 
-function drawBuilding(
+function drawRestaurantFacade(
   ctx: CanvasRenderingContext2D,
-  W: number, H: number,
-  stage: number, time: number, p: number
+  x: number, y: number, w: number, h: number,
+  dn: number, time: number
 ) {
-  const cx  = W * 0.42;
-  const groundY = H * 0.62;
-
-  if (stage === 0) drawStand(ctx, cx - 75, groundY - 90, 150, 90, time, p);
-  else if (stage === 1) drawRestaurantS(ctx, cx - 100, groundY - 160, 200, 160, time, p);
-  else if (stage === 2) drawRestaurantL(ctx, cx - 140, groundY - 240, 280, 240, time, p);
-  else drawFranchise(ctx, cx - 190, groundY - 320, 380, 320, time, p);
-}
-
-// Stage 0: food cart / kiosk
-function drawStand(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, time: number, p: number) {
-  // Body
-  ctx.fillStyle = "#9c7c50";
-  rr(ctx, x, y, w, h, 5);
+  // Upper floor
+  ctx.fillStyle = "#c8a868";
+  rr(ctx, x + 28, y, w - 56, h / 2 + 20, 6);
   ctx.fill();
+
+  // Ground floor
+  ctx.fillStyle = "#d8b87a";
+  rr(ctx, x, y + h / 2 - 10, w, h / 2 + 10, 6);
+  ctx.fill();
+  ctx.strokeStyle = "#8a6830";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  rr(ctx, x, y + h / 2 - 10, w, h / 2 + 10, 6);
+  ctx.stroke();
+
+  // Roof band
+  ctx.fillStyle = "#5c2008";
+  ctx.fillRect(x - 4, y + h / 2 - 12, w + 8, 14);
+  ctx.fillRect(x + 22, y - 2, w - 44, 12);
+
+  // Ground floor cornice
+  ctx.fillStyle = "#9a7040";
+  ctx.fillRect(x - 2, y + h / 2 - 1, w + 4, 6);
+
+  // Upper windows (2)
+  drawWindow(ctx, x + 46, y + 18, 52, 44, dn, time);
+  drawWindow(ctx, x + w - 98, y + 18, 52, 44, dn, time);
+
+  // Ground floor windows (3)
+  drawWindow(ctx, x + 14, y + h - 118, 62, 78, dn, time);
+  drawWindow(ctx, x + w / 2 - 32, y + h - 118, 62, 78, dn, time);
+  drawWindow(ctx, x + w - 76, y + h - 118, 62, 78, dn, time);
+
+  // Main door
+  drawDoor(ctx, x + w / 2 - 26, y + h - 85, 52, 85);
 
   // Awning
-  ctx.fillStyle = "#b02020";
-  ctx.fillRect(x - 18, y, w + 36, 22);
-  // Awning stripes
-  ctx.fillStyle = "#d43030";
-  for (let i = 0; i < 5; i++) ctx.fillRect(x - 18 + i * 34, y, 17, 22);
-
-  // Counter
-  ctx.fillStyle = "#6e5030";
-  ctx.fillRect(x, y + h - 22, w, 22);
-
-  // Sign above awning
-  drawSign(ctx, x + w/2, y - 28, w - 30, 26, "PIZZA", time, p);
-
-  drawSmoke(ctx, x + w - 28, y - 2, time);
-}
-
-// Stage 1: small restaurant
-function drawRestaurantS(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, time: number, p: number) {
-  // Building
-  ctx.fillStyle = "#c4a878";
-  rr(ctx, x, y, w, h, 8);
-  ctx.fill();
-  ctx.strokeStyle = "#7a6040";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Roof
-  ctx.fillStyle = "#6e3a18";
-  ctx.fillRect(x - 8, y, w + 16, 18);
-
-  // Door
-  ctx.fillStyle = "#3c2010";
-  rr(ctx, x + w/2 - 18, y + h - 60, 36, 60, 4);
-  ctx.fill();
-
-  // Windows (2)
-  drawWindow(ctx, x + 18, y + h - 95, 42, 52, p, time);
-  drawWindow(ctx, x + w - 60, y + h - 95, 42, 52, p, time);
+  ctx.fillStyle = "#aa1e1e";
+  ctx.fillRect(x + w / 2 - 75, y + h - 100, 150, 18);
+  drawAwningScallop(ctx, x + w / 2 - 75, y + h - 83, 150, 14);
 
   // Sign
-  drawSign(ctx, x + w/2, y - 18, w - 20, 34, "PIZZA EMPIRE", time, p);
-  drawSmoke(ctx, x + w - 30, y - 2, time);
+  drawSignBoard(ctx, x + w / 2, y - 12, w - 10, 44, "PIZZA EMPIRE", dn, time);
+
+  // Smoke
+  drawSmoke(ctx, x + 50, y + h / 2 - 6, time, 0.3);
+  drawSmoke(ctx, x + w - 50, y + h / 2 - 6, time + 1.4, 0.3);
 }
 
-// Stage 2: full restaurant
-function drawRestaurantL(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, time: number, p: number) {
-  // Ground floor
-  ctx.fillStyle = "#d4b888";
-  rr(ctx, x, y + h/2, w, h/2, 8);
+// ── Stage 3: Franchise tower ───────────────────────────
+
+function drawFranchiseTower(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, w: number, h: number,
+  W: number, dn: number, time: number
+) {
+  // Side wings
+  ctx.fillStyle = "#c09858";
+  rr(ctx, x - 28, y + h * 0.48, 48, h * 0.52, 4);
   ctx.fill();
-  // Upper floor
-  ctx.fillStyle = "#c4a870";
-  rr(ctx, x + 24, y, w - 48, h/2 + 10, 8);
-  ctx.fill();
-  // border
-  ctx.strokeStyle = "#7a6040";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  rr(ctx, x, y + h/2, w, h/2, 8);
-  ctx.stroke();
-
-  // Roof
-  ctx.fillStyle = "#6e2a0e";
-  ctx.fillRect(x + 16, y + h/2, w - 32, 14);
-  ctx.fillRect(x + 36, y, w - 72, 12);
-
-  // Windows ground floor x3
-  for (let i = 0; i < 3; i++) {
-    const wx = x + 14 + i * ((w - 28) / 3);
-    drawWindow(ctx, wx, y + h - 95, 50, 60, p, time);
-  }
-  // Upper windows x2
-  drawWindow(ctx, x + 44, y + 20, 44, 38, p, time);
-  drawWindow(ctx, x + w - 88, y + 20, 44, 38, p, time);
-
-  // Door
-  ctx.fillStyle = "#2a1408";
-  rr(ctx, x + w/2 - 24, y + h - 65, 48, 65, 6);
+  rr(ctx, x + w - 20, y + h * 0.48, 48, h * 0.52, 4);
   ctx.fill();
 
-  // Sign
-  drawSign(ctx, x + w/2, y + h/2 - 20, w - 24, 38, "PIZZA EMPIRE", time, p);
-  drawSmoke(ctx, x + 42, y + h/2 - 4, time);
-  drawSmoke(ctx, x + w - 42, y + h/2 - 4, time + 1.3);
-
-  // Outdoor table
-  drawTable(ctx, x - 52, y + h - 38, time);
-}
-
-// Stage 3: mega franchise
-function drawFranchise(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, time: number, p: number) {
-  // Main tower
-  ctx.fillStyle = "#e0c898";
-  rr(ctx, x, y + h * 0.35, w, h * 0.65, 10);
+  // Lower facade
+  ctx.fillStyle = "#d8b870";
+  rr(ctx, x, y + h * 0.42, w, h * 0.58, 6);
   ctx.fill();
-  // Upper section
-  ctx.fillStyle = "#d0b880";
-  rr(ctx, x + 30, y + h * 0.15, w - 60, h * 0.5, 8);
+
+  // Mid facade
+  ctx.fillStyle = "#caa860";
+  rr(ctx, x + 22, y + h * 0.22, w - 44, h * 0.38, 6);
   ctx.fill();
-  // Top spire section
-  ctx.fillStyle = "#c0a870";
-  rr(ctx, x + 70, y, w - 140, h * 0.3, 8);
+
+  // Upper tower
+  ctx.fillStyle = "#ba9850";
+  rr(ctx, x + 52, y, w - 104, h * 0.3, 8);
   ctx.fill();
 
   // Borders
-  ctx.strokeStyle = "#7a6040";
+  ctx.strokeStyle = "#7a5828";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  rr(ctx, x, y + h * 0.35, w, h * 0.65, 10);
+  rr(ctx, x, y + h * 0.42, w, h * 0.58, 6);
   ctx.stroke();
 
-  // Antenna + blinking red LED
-  ctx.strokeStyle = "#5a4830";
-  ctx.lineWidth = 2.5;
+  // Roof bands
+  ctx.fillStyle = "#5c1e08";
+  ctx.fillRect(x - 2, y + h * 0.4, w + 4, 12);
+  ctx.fillRect(x + 18, y + h * 0.2, w - 36, 10);
+  ctx.fillRect(x + 48, y - 2, w - 96, 10);
+
+  // Antenna
+  ctx.strokeStyle = "#6a5030";
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(x + w/2, y);
-  ctx.lineTo(x + w/2, y - 36);
+  ctx.moveTo(x + w / 2, y);
+  ctx.lineTo(x + w / 2, y - 42);
   ctx.stroke();
-  ctx.fillStyle = Math.sin(time * 5) > 0 ? "#ff3030" : "#550000";
+  // Blinking LED
+  const ledOn = Math.sin(time * 5) > 0;
+  ctx.fillStyle = ledOn ? "#ff3c3c" : "#3c0000";
   ctx.beginPath();
-  ctx.arc(x + w/2, y - 38, 4, 0, Math.PI * 2);
+  ctx.arc(x + w / 2, y - 44, 4, 0, Math.PI * 2);
   ctx.fill();
+  if (ledOn) {
+    ctx.fillStyle = "rgba(255,60,60,0.25)";
+    ctx.beginPath();
+    ctx.arc(x + w / 2, y - 44, 10, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Windows (grid)
-  const rows = 4, cols = 5;
+  // Window grid (lower facade)
+  const cols = 5, rows = 3;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       if (r === rows - 1 && c > 0 && c < cols - 1) continue; // door space
-      const wx = x + 16 + c * ((w - 32) / cols);
-      const wy = y + h * 0.38 + r * ((h * 0.52) / rows);
-      const on = Math.sin(time * 0.4 + r * 3.1 + c * 6.7) > -0.3;
-      drawWindow(ctx, wx, wy, 38, 28, on && p > 0.3 ? p : 0, time);
+      const wx = x + 14 + c * ((w - 28) / cols);
+      const wy = y + h * 0.46 + r * ((h * 0.4) / rows);
+      const lightOn = Math.sin(time * 0.35 + r * 4.2 + c * 7.7) > -0.4;
+      drawWindow(ctx, wx, wy, 42, 30, lightOn && dn > 0.2 ? dn : 0, time);
     }
   }
 
-  // Upper windows
-  for (let i = 0; i < 3; i++) {
-    drawWindow(ctx, x + 48 + i * ((w - 96) / 3), y + h * 0.18, 44, 30, p, time);
-  }
-
-  // Entrance canopy
-  ctx.fillStyle = "#a02020";
-  ctx.fillRect(x + w/2 - 60, y + h - 88, 120, 16);
+  // Mid windows (2)
+  drawWindow(ctx, x + 48, y + h * 0.25, 50, 40, dn, time);
+  drawWindow(ctx, x + w - 98, y + h * 0.25, 50, 40, dn, time);
 
   // Door
-  ctx.fillStyle = "#1a0800";
-  rr(ctx, x + w/2 - 32, y + h - 72, 64, 72, 6);
+  drawDoor(ctx, x + w / 2 - 30, y + h - 88, 60, 88);
+
+  // Main entrance awning
+  ctx.fillStyle = "#aa1e1e";
+  ctx.fillRect(x + w / 2 - 90, y + h - 105, 180, 20);
+  drawAwningScallop(ctx, x + w / 2 - 90, y + h - 86, 180, 16);
+
+  // BIG illuminated sign board (the marquee)
+  drawMarqueeSign(ctx, x + w / 2, y + h * 0.42 - 22, w - 8, 50, dn, time);
+
+  // Smaller sign above upper floor
+  drawSignBoard(ctx, x + w / 2, y - 16, w - 106, 38, "PIZZA EMPIRE", dn, time);
+
+  // Side wing windows
+  drawWindow(ctx, x - 20, y + h * 0.54, 32, 24, dn, time);
+  drawWindow(ctx, x + w - 12, y + h * 0.54, 32, 24, dn, time);
+
+  // Smoke from roof
+  drawSmoke(ctx, x + 55, y - 2, time, 0.35);
+  drawSmoke(ctx, x + w - 55, y - 2, time + 1.6, 0.35);
+  drawSmoke(ctx, x + w / 2 - 15, y + h * 0.2 - 6, time + 0.8, 0.28);
+
+  void W;
+}
+
+// ── SIGN BOARD (horizontal panel — NOT a circle) ───────
+
+function drawSignBoard(
+  ctx: CanvasRenderingContext2D,
+  cx: number, y: number, w: number, h: number,
+  label: string, dn: number, time: number
+) {
+  const glow = dn > 0.25 ? clamp((dn - 0.25) / 0.4, 0, 1) : 0;
+  const pulse = glow > 0 ? 0.7 + 0.3 * Math.sin(time * 2) : 0;
+
+  // Panel background
+  ctx.fillStyle = "#0e1a2c";
+  rr(ctx, cx - w / 2, y, w, h, 4);
   ctx.fill();
 
-  // Neon sign
-  const neonPulse = 0.65 + Math.sin(time * 2.2) * 0.35;
-  const neonAlpha = Math.min(1, neonPulse);
-  ctx.fillStyle = "#0d1520";
-  rr(ctx, x - 10, y + h * 0.35 - 52, w + 20, 52, 8);
-  ctx.fill();
-  ctx.strokeStyle = `rgba(212,149,42,${neonAlpha})`;
+  // Gold border
+  ctx.strokeStyle = `rgba(212,149,42,${0.4 + pulse * 0.5})`;
   ctx.lineWidth = 2;
-  ctx.shadowColor = "#d4952a";
-  ctx.shadowBlur = 12 * neonAlpha;
+  if (glow > 0) {
+    ctx.shadowColor = "#d4952a";
+    ctx.shadowBlur = 10 * pulse;
+  }
   ctx.beginPath();
-  rr(ctx, x - 10, y + h * 0.35 - 52, w + 20, 52, 8);
+  rr(ctx, cx - w / 2, y, w, h, 4);
   ctx.stroke();
   ctx.shadowBlur = 0;
 
-  // Sign text drawn as geometric shapes instead of text
-  drawSignGraphic(ctx, x + w/2, y + h * 0.35 - 26, neonAlpha);
-
-  // Chimneys
-  drawSmoke(ctx, x + 60, y + h * 0.35 - 4, time);
-  drawSmoke(ctx, x + w - 60, y + h * 0.35 - 4, time + 1.1);
-  drawSmoke(ctx, x + w/2, y + h * 0.15 - 4, time + 2.2);
-
-  drawTable(ctx, x - 70, y + h - 45, time);
+  // Content: text-bars (readable as text placeholder since we can't use real fonts reliably)
+  // Use canvas text rendering — it's fine here as it's part of the game world
+  ctx.fillStyle = `rgba(212,149,42,${0.8 + pulse * 0.2})`;
+  ctx.shadowColor = glow > 0 ? "#d4952a" : "transparent";
+  ctx.shadowBlur = glow > 0 ? 6 * pulse : 0;
+  ctx.font = `bold ${Math.floor(h * 0.42)}px 'DM Sans', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, cx, y + h / 2);
+  ctx.shadowBlur = 0;
 }
 
-// ── HELPERS ───────────────────────────────────────────────
+// ── MARQUEE SIGN (franchise stage — wider, more dramatic) ─
+
+function drawMarqueeSign(
+  ctx: CanvasRenderingContext2D,
+  cx: number, y: number, w: number, h: number,
+  dn: number, time: number
+) {
+  const pulse = 0.65 + 0.35 * Math.sin(time * 2.5);
+
+  // Outer panel
+  ctx.fillStyle = "#09111e";
+  rr(ctx, cx - w / 2, y, w, h, 6);
+  ctx.fill();
+
+  // Neon border strip
+  ctx.strokeStyle = `rgba(212,149,42,${0.5 + pulse * 0.45})`;
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = "#d4952a";
+  ctx.shadowBlur = dn > 0.3 ? 16 * pulse : 4;
+  ctx.beginPath();
+  rr(ctx, cx - w / 2, y, w, h, 6);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Inner content
+  ctx.fillStyle = `rgba(212,149,42,${0.85 + pulse * 0.15})`;
+  ctx.shadowColor = dn > 0.3 ? "#d4952a" : "transparent";
+  ctx.shadowBlur = dn > 0.3 ? 8 * pulse : 0;
+  ctx.font = `bold ${Math.floor(h * 0.38)}px 'DM Sans', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("PIZZA EMPIRE", cx, y + h / 2 - 2);
+  ctx.shadowBlur = 0;
+
+  // Decorative dot lights along top + bottom edges
+  const dotCount = Math.floor(w / 14);
+  for (let i = 0; i < dotCount; i++) {
+    const dx = cx - w / 2 + 8 + i * 14;
+    const dotOn = Math.sin(time * 3 + i * 0.7) > 0.1;
+    ctx.fillStyle = dotOn ? `rgba(255,220,80,${0.9})` : "rgba(60,45,15,0.9)";
+    if (dotOn) { ctx.shadowColor = "#ffe050"; ctx.shadowBlur = 5; }
+    ctx.beginPath();
+    ctx.arc(dx, y + 5, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dx, y + h - 5, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+// ── WINDOW ────────────────────────────────────────────────
 
 function drawWindow(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, w: number, h: number,
-  lightLevel: number, time: number
+  lightLevel: number, _time: number
 ) {
-  const lit = lightLevel > 0.1;
+  const lit = lightLevel > 0.05;
+  // Frame
+  ctx.fillStyle = "#4a3820";
+  rr(ctx, x - 2, y - 2, w + 4, h + 4, 2);
+  ctx.fill();
+
+  // Glass
   ctx.fillStyle = lit
-    ? `rgba(255,200,80,${Math.min(0.85, lightLevel * 0.85 + Math.sin(time * 0.3) * 0.05)})`
-    : "rgba(20,35,55,0.8)";
-  ctx.shadowColor = lit ? "#ffa030" : "transparent";
-  ctx.shadowBlur  = lit ? 8 : 0;
+    ? `rgba(255,200,80,${clamp(lightLevel * 0.8, 0.3, 0.82)})`
+    : "rgba(20,35,60,0.75)";
+  if (lit) {
+    ctx.shadowColor = "#ffb830";
+    ctx.shadowBlur = 10 * lightLevel;
+  }
   rr(ctx, x, y, w, h, 2);
   ctx.fill();
   ctx.shadowBlur = 0;
 
-  // Frame
-  ctx.strokeStyle = "rgba(80,60,30,0.6)";
+  // Pane divisions
+  ctx.strokeStyle = "rgba(60,40,10,0.5)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  rr(ctx, x, y, w, h, 2);
+  ctx.moveTo(x + w / 2, y);
+  ctx.lineTo(x + w / 2, y + h);
+  ctx.moveTo(x, y + h * 0.45);
+  ctx.lineTo(x + w, y + h * 0.45);
   ctx.stroke();
 
-  // Cross pane
-  ctx.strokeStyle = "rgba(80,60,30,0.4)";
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(x + w/2, y);
-  ctx.lineTo(x + w/2, y + h);
-  ctx.moveTo(x, y + h/2);
-  ctx.lineTo(x + w, y + h/2);
-  ctx.stroke();
+  // Sill
+  ctx.fillStyle = "#5a4020";
+  ctx.fillRect(x - 3, y + h, w + 6, 4);
 }
 
-function drawSign(
-  ctx: CanvasRenderingContext2D,
-  cx: number, y: number, w: number, h: number,
-  _label: string, time: number, p: number
-) {
-  const glow = p > 0.3 ? 0.5 + Math.sin(time * 2.5) * 0.3 : 0;
-  ctx.fillStyle = "#1a0a00";
-  rr(ctx, cx - w/2, y, w, h, 4);
+// ── DOOR ──────────────────────────────────────────────────
+
+function drawDoor(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  // Frame
+  ctx.fillStyle = "#3a2010";
+  rr(ctx, x - 3, y, w + 6, h, 4);
   ctx.fill();
-  ctx.strokeStyle = `rgba(212,149,42,${0.3 + glow * 0.5})`;
-  ctx.lineWidth = 1.5;
-  ctx.shadowColor = "#d4952a";
-  ctx.shadowBlur = glow > 0 ? 10 * glow : 0;
-  ctx.beginPath();
-  rr(ctx, cx - w/2, y, w, h, 4);
-  ctx.stroke();
-  ctx.shadowBlur = 0;
 
-  // Draw stylized "P" and lines as SVG-style marks
-  drawPizzaSignContent(ctx, cx, y + h/2, w, h);
+  // Door panels (two)
+  const pw = (w - 6) / 2;
+  ctx.fillStyle = "#2a1808";
+  rr(ctx, x, y + 4, pw - 1, h - 4, 3);
+  ctx.fill();
+  rr(ctx, x + pw + 2, y + 4, pw - 1, h - 4, 3);
+  ctx.fill();
+
+  // Door handle dots
+  ctx.fillStyle = "#c8a040";
+  ctx.beginPath();
+  ctx.arc(x + pw - 4, y + h / 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + pw + 6, y + h / 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Transom window above
+  ctx.fillStyle = "rgba(60,100,160,0.4)";
+  rr(ctx, x, y - 16, w, 14, 3);
+  ctx.fill();
 }
 
-// Draw sign content as geometric SVG marks (no text rendering)
-function drawPizzaSignContent(
+// ── AWNING SCALLOP EDGE ───────────────────────────────────
+
+function drawAwningScallop(
   ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, w: number, _h: number
+  x: number, y: number, w: number, h: number
 ) {
-  ctx.strokeStyle = "rgba(212,149,42,0.8)";
-  ctx.lineWidth = 1.5;
-
-  // Pizza circle icon on the left
-  const iconX = cx - w * 0.28;
-  const r = 6;
-  ctx.beginPath();
-  ctx.arc(iconX, cy, r, 0, Math.PI * 2);
-  ctx.stroke();
-  // Slice lines
-  ctx.beginPath();
-  ctx.moveTo(iconX, cy - r);
-  ctx.lineTo(iconX, cy + r);
-  ctx.moveTo(iconX - r * 0.87, cy - r * 0.5);
-  ctx.lineTo(iconX + r * 0.87, cy + r * 0.5);
-  ctx.moveTo(iconX - r * 0.87, cy + r * 0.5);
-  ctx.lineTo(iconX + r * 0.87, cy - r * 0.5);
-  ctx.stroke();
-
-  // Three horizontal bars = text placeholder
-  const textX = cx - w * 0.05;
-  const lineW = w * 0.38;
-  ctx.lineWidth = 1.8;
-  ctx.beginPath();
-  ctx.moveTo(textX, cy - 5);
-  ctx.lineTo(textX + lineW, cy - 5);
-  ctx.moveTo(textX, cy);
-  ctx.lineTo(textX + lineW * 0.75, cy);
-  ctx.moveTo(textX, cy + 5);
-  ctx.lineTo(textX + lineW * 0.88, cy + 5);
-  ctx.stroke();
-}
-
-function drawSignGraphic(ctx: CanvasRenderingContext2D, cx: number, cy: number, alpha: number) {
-  ctx.strokeStyle = `rgba(212,149,42,${alpha * 0.9})`;
-  ctx.lineWidth = 2;
-
-  // Large pizza circle
-  ctx.beginPath();
-  ctx.arc(cx - 60, cy, 14, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx - 60, cy - 14);
-  ctx.lineTo(cx - 60, cy + 14);
-  ctx.moveTo(cx - 74, cy - 7);
-  ctx.lineTo(cx - 46, cy + 7);
-  ctx.moveTo(cx - 74, cy + 7);
-  ctx.lineTo(cx - 46, cy - 7);
-  ctx.stroke();
-
-  // Text bars
-  const bars = [
-    [cx - 30, cy - 7, 110],
-    [cx - 30, cy + 1, 80],
-    [cx - 30, cy + 9, 100],
-  ] as [number, number, number][];
-  ctx.lineWidth = 3;
-  for (const [bx, by, bw] of bars) {
+  const count = Math.floor(w / 18);
+  const aw = w / count;
+  ctx.fillStyle = "#991a1a";
+  for (let i = 0; i < count; i++) {
     ctx.beginPath();
-    ctx.moveTo(bx, by);
-    ctx.lineTo(bx + bw, by);
-    ctx.stroke();
+    ctx.arc(x + i * aw + aw / 2, y, aw / 2, 0, Math.PI);
+    ctx.fill();
+  }
+  ctx.fillStyle = "#bb2020";
+  ctx.fillRect(x, y - h, w, h);
+  // Stripes
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  for (let i = 0; i < Math.floor(w / 22); i++) {
+    ctx.fillRect(x + i * 22, y - h, 11, h);
   }
 }
 
-function drawSmoke(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
-  for (let i = 0; i < 3; i++) {
-    const t = (time * 0.45 + i * 0.33) % 1;
-    const ox = Math.sin(time + i * 2.1) * 4;
-    const oy = -t * 38;
-    const a  = (1 - t) * 0.28;
-    const sz = 5 + t * 12;
-    ctx.fillStyle = `rgba(200,190,180,${a})`;
+// ── SMOKE ─────────────────────────────────────────────────
+
+function drawSmoke(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  time: number, strength: number
+) {
+  for (let i = 0; i < 4; i++) {
+    const t = (time * 0.4 + i * 0.25) % 1;
+    const ox = Math.sin(time * 0.8 + i * 2.3) * 5;
+    const oy = -t * 45;
+    const a  = (1 - t) * strength;
+    const sz = 4 + t * 14;
+    ctx.fillStyle = `rgba(220,215,200,${a})`;
     ctx.beginPath();
     ctx.arc(x + ox, y + oy, sz, 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
-function drawTable(ctx: CanvasRenderingContext2D, x: number, y: number, _time: number) {
-  // Umbrella
-  ctx.fillStyle = "#a02020";
+// ── STREET ELEMENTS ───────────────────────────────────────
+
+function drawStreetElements(
+  ctx: CanvasRenderingContext2D,
+  W: number, H: number,
+  groundY: number,
+  time: number, dn: number, stage: number
+) {
+  // Lamp posts (flanking restaurant)
+  const cx = W / 2;
+  const lampSpread = 180 + stage * 40;
+  drawLampPost(ctx, cx - lampSpread, groundY, time, dn);
+  drawLampPost(ctx, cx + lampSpread, groundY, time, dn);
+
+  // Outdoor seating (appears from stage 1+)
+  if (stage >= 1) {
+    drawCafeTable(ctx, cx - lampSpread + 30, groundY - 2, time);
+  }
+  if (stage >= 2) {
+    drawCafeTable(ctx, cx + lampSpread - 60, groundY - 2, time);
+  }
+
+  // Flower planters (always)
+  drawPlanter(ctx, cx - 145, groundY - 2);
+  drawPlanter(ctx, cx + 125, groundY - 2);
+
+  void H;
+}
+
+function drawLampPost(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  time: number, dn: number
+) {
+  // Base
+  ctx.fillStyle = "#2c2820";
+  ctx.fillRect(x - 4, y - 2, 8, 6);
+
+  // Pole
+  ctx.strokeStyle = "#2c2820";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x + 28, y - 28);
-  ctx.lineTo(x, y - 4);
-  ctx.lineTo(x + 56, y - 4);
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, y - 88);
+  ctx.stroke();
+
+  // Arm
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 85);
+  ctx.quadraticCurveTo(x, y - 98, x + 22, y - 98);
+  ctx.stroke();
+
+  // Lamp housing
+  ctx.fillStyle = "#1e1c18";
+  ctx.fillRect(x + 14, y - 106, 20, 14);
+
+  // Light (brighter at night)
+  const litAlpha = dn > 0.15 ? clamp(dn * 1.4, 0.3, 1) : 0.15;
+  const flicker  = 0.85 + 0.15 * Math.sin(time * 3.2);
+
+  // Light cone
+  const cg = ctx.createRadialGradient(x + 24, y - 99, 0, x + 24, y - 75, 52);
+  cg.addColorStop(0, `rgba(255,220,100,${litAlpha * flicker * 0.65})`);
+  cg.addColorStop(1, "rgba(255,220,100,0)");
+  ctx.fillStyle = cg;
+  ctx.beginPath();
+  ctx.moveTo(x + 24, y - 99);
+  ctx.lineTo(x - 18, y - 25);
+  ctx.lineTo(x + 66, y - 25);
   ctx.closePath();
   ctx.fill();
 
-  // Pole
-  ctx.strokeStyle = "#6e4020";
+  // Bulb
+  ctx.fillStyle = `rgba(255,245,160,${litAlpha * flicker})`;
+  ctx.shadowColor = "#ffe060";
+  ctx.shadowBlur  = 8 * litAlpha;
+  ctx.beginPath();
+  ctx.arc(x + 24, y - 99, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawCafeTable(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  _time: number
+) {
+  // Umbrella canopy
+  const r = 32;
+  const ug = ctx.createRadialGradient(x, y - 38, 0, x, y - 38, r);
+  ug.addColorStop(0, "#c82828");
+  ug.addColorStop(0.7, "#a82020");
+  ug.addColorStop(1, "#8a1818");
+  ctx.fillStyle = ug;
+  ctx.beginPath();
+  ctx.ellipse(x, y - 38, r, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Scallop edge
+  const segs = 8;
+  ctx.fillStyle = "#a82020";
+  for (let i = 0; i < segs; i++) {
+    const angle = (Math.PI * 2 * i) / segs;
+    const ex = x + Math.cos(angle) * r;
+    const ey = y - 38 + Math.sin(angle) * 10;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Center pole
+  ctx.strokeStyle = "#5a4820";
   ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.moveTo(x + 28, y - 4);
-  ctx.lineTo(x + 28, y + 6);
+  ctx.moveTo(x, y - 28);
+  ctx.lineTo(x, y + 4);
   ctx.stroke();
 
   // Table top
-  ctx.fillStyle = "#b08850";
-  ctx.fillRect(x + 4, y - 2, 48, 8);
+  ctx.fillStyle = "#9c7840";
+  ctx.beginPath();
+  ctx.ellipse(x, y - 4, 28, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#6a5020";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Chairs
-  ctx.fillStyle = "#6e4020";
-  ctx.fillRect(x, y + 6, 14, 10);
-  ctx.fillRect(x + 42, y + 6, 14, 10);
+  // Chairs (2)
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = "#6a4820";
+    // Seat
+    ctx.beginPath();
+    ctx.ellipse(x + side * 34, y + 4, 12, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Legs
+    ctx.strokeStyle = "#5a3810";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + side * 34 - 8, y + 4);
+    ctx.lineTo(x + side * 34 - 8, y + 14);
+    ctx.moveTo(x + side * 34 + 8, y + 4);
+    ctx.lineTo(x + side * 34 + 8, y + 14);
+    ctx.stroke();
+  }
 }
 
-// ── WORKERS ON CANVAS ─────────────────────────────────────
+function drawPlanter(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  // Pot
+  ctx.fillStyle = "#8a5020";
+  ctx.beginPath();
+  ctx.moveTo(x - 10, y);
+  ctx.lineTo(x + 10, y);
+  ctx.lineTo(x + 7, y - 22);
+  ctx.lineTo(x - 7, y - 22);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#6a3c14";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Soil
+  ctx.fillStyle = "#4a2810";
+  ctx.beginPath();
+  ctx.ellipse(x, y - 22, 8, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stems
+  ctx.strokeStyle = "#2a6a2a";
+  ctx.lineWidth = 1.5;
+  for (let i = -2; i <= 2; i++) {
+    const stemH = 12 + Math.abs(i) * 3;
+    ctx.beginPath();
+    ctx.moveTo(x + i * 3, y - 22);
+    ctx.quadraticCurveTo(x + i * 5, y - 28, x + i * 4, y - 22 - stemH);
+    ctx.stroke();
+  }
+
+  // Flowers (small circles)
+  ctx.fillStyle = "#c83030";
+  ctx.beginPath(); ctx.arc(x - 6, y - 35, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#d49020";
+  ctx.beginPath(); ctx.arc(x + 6, y - 32, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#c83030";
+  ctx.beginPath(); ctx.arc(x, y - 38, 3.5, 0, Math.PI * 2); ctx.fill();
+}
+
+// ── WORKERS ───────────────────────────────────────────────
 
 function drawWorkers(
   ctx: CanvasRenderingContext2D,
   W: number, H: number,
+  groundY: number,
   counts: Record<string, number>,
   time: number,
   stage: number
 ) {
-  const groundY = H * 0.62;
-
-  // Delivery bikers
-  const bikers = Math.min(counts["pizza_boy"] || 0, 3);
-  for (let i = 0; i < bikers; i++) {
-    const speed = 0.28 + i * 0.09;
-    const xPos  = ((time * speed * 80 + i * (W / 3)) % (W + 120)) - 60;
-    drawBiker(ctx, xPos, groundY - 38, time);
+  // Delivery bikers (road level)
+  const bikerCount = Math.min(counts["pizza_boy"] || 0, 3);
+  for (let i = 0; i < bikerCount; i++) {
+    const spd  = 0.22 + i * 0.08;
+    const xPos = ((time * spd * 90 + i * (W / 3)) % (W + 140)) - 70;
+    const roadY = groundY + H * 0.1 + 18;
+    drawBiker(ctx, xPos, roadY, time);
   }
 
-  // Chef in window
-  const chefs = Math.min(counts["head_chef"] || 0, 2);
-  for (let i = 0; i < chefs; i++) {
-    const bob = Math.sin(time * 2.2 + i) * 2;
-    drawChef(ctx, W * 0.32 + i * 54, groundY - (stage >= 2 ? 100 : 70) + bob);
+  // Chefs visible in windows (from stage 1)
+  if (stage >= 1) {
+    const chefCount = Math.min(counts["head_chef"] || 0, 2);
+    const cx = W / 2;
+    const windowXs = [cx - 90, cx + 36];
+    for (let i = 0; i < chefCount; i++) {
+      const bob = Math.sin(time * 1.8 + i) * 2;
+      drawChef(ctx, windowXs[i], groundY - 70 + bob - (stage >= 2 ? 30 : 0));
+    }
   }
 
-  // Manager figure (stage 2+)
+  // Manager at door (stage 2+)
   if ((counts["kitchen_manager"] || 0) > 0 && stage >= 2) {
-    const bob = Math.sin(time * 1.4) * 1.5;
-    drawManager(ctx, W * 0.5, groundY - 75 + bob);
+    const bob = Math.sin(time * 1.1) * 1.5;
+    const cx = W / 2;
+    drawStaffFigure(ctx, cx - 18, groundY - 68 + bob, "#2a3a5c");
   }
 
-  // Drones (stage 3 or many delivery guys)
+  // Customers walking on sidewalk
+  const custCount = 1 + Math.min(stage, 3);
+  for (let i = 0; i < custCount; i++) {
+    const dir  = i % 2 === 0 ? 1 : -1;
+    const spd  = 0.28 + i * 0.09;
+    let   xPos = ((time * spd * 50 * dir + i * (W / custCount)) % (W + 80)) - 40;
+    if (dir < 0) xPos = W - xPos;
+    drawCustomer(ctx, xPos, groundY + 5, i, time);
+  }
+
+  // Drones (stage 3 or high-level workers)
   if (stage >= 3 || (counts["regional_director"] || 0) > 0) {
     for (let i = 0; i < 2; i++) {
-      const xPos = ((time * (1.1 + i * 0.4) * 55 + i * (W / 2)) % (W + 100)) - 50;
-      const yPos = H * 0.12 + Math.sin(time * 1.8 + i * 2.1) * 18 + i * 35;
+      const xPos = ((time * (1.0 + i * 0.35) * 60 + i * (W / 2)) % (W + 120)) - 60;
+      const yPos = groundY * 0.18 + Math.sin(time * 1.6 + i * 2) * 16 + i * 38;
       drawDrone(ctx, xPos, yPos, time);
     }
   }
@@ -626,60 +984,68 @@ function drawBiker(ctx: CanvasRenderingContext2D, x: number, y: number, time: nu
   ctx.translate(x, y);
 
   // Wheels
-  ctx.strokeStyle = "#1a1814";
-  ctx.lineWidth = 2;
-  ctx.fillStyle = "#2a2620";
-  for (const wx of [-17, 17]) {
-    ctx.beginPath();
-    ctx.arc(wx, 8, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#4a4440";
+  for (const wx of [-16, 16]) {
+    ctx.fillStyle = "#181614";
+    ctx.strokeStyle = "#383430";
     ctx.lineWidth = 1;
-    ctx.stroke();
-    // Spoke
-    ctx.strokeStyle = "#3a3430";
     ctx.beginPath();
-    ctx.moveTo(wx - 4, 8);
-    ctx.lineTo(wx + 4, 8);
-    ctx.moveTo(wx, 4);
-    ctx.lineTo(wx, 12);
+    ctx.arc(wx, 6, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Spoke cross
+    ctx.strokeStyle = "#303030";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(wx - 5, 6); ctx.lineTo(wx + 5, 6);
+    ctx.moveTo(wx, 1);     ctx.lineTo(wx, 11);
     ctx.stroke();
   }
 
-  // Frame
-  ctx.strokeStyle = "#c02020";
+  // Bike frame
+  ctx.strokeStyle = "#c02828";
   ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(-17, 6);
-  ctx.lineTo(0, -8);
-  ctx.lineTo(17, 6);
+  ctx.moveTo(-16, 4);
+  ctx.lineTo(-2, -10);
+  ctx.lineTo(16, 4);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(0, -8);
-  ctx.lineTo(0, -16);
+  ctx.moveTo(-2, -10);
+  ctx.lineTo(-2, -18);
+  ctx.stroke();
+  // Handlebar
+  ctx.beginPath();
+  ctx.moveTo(-6, -18);
+  ctx.lineTo(2, -18);
   ctx.stroke();
 
-  // Rider body
-  const bob = Math.sin(time * 10) * 0.8;
-  ctx.fillStyle = "#2c5c3c";
-  ctx.fillRect(-5, -28 + bob, 14, 18);
+  // Rider body (bobbing)
+  const bob = Math.sin(time * 10) * 0.7;
+  ctx.fillStyle = "#2c5040";
+  ctx.fillRect(-5, -30 + bob, 12, 16);
   // Head
   ctx.fillStyle = "#d4a870";
   ctx.beginPath();
-  ctx.arc(5, -34 + bob, 7, 0, Math.PI * 2);
+  ctx.arc(4, -36 + bob, 7, 0, Math.PI * 2);
   ctx.fill();
   // Helmet
-  ctx.fillStyle = "#c02020";
+  ctx.fillStyle = "#c02828";
   ctx.beginPath();
-  ctx.arc(5, -37 + bob, 6, Math.PI, 0);
+  ctx.arc(4, -39 + bob, 6, Math.PI, 0);
   ctx.fill();
+  // Visor
+  ctx.fillStyle = "rgba(80,160,200,0.5)";
+  ctx.fillRect(0, -38 + bob, 8, 3);
 
-  // Pizza box
-  ctx.fillStyle = "#d4952a";
-  ctx.fillRect(-18, -24 + bob, 12, 8);
-  ctx.strokeStyle = "#a07020";
+  // Delivery box
+  ctx.fillStyle = "#c89020";
+  ctx.strokeStyle = "#907018";
   ctx.lineWidth = 0.8;
-  ctx.strokeRect(-18, -24 + bob, 12, 8);
+  ctx.beginPath();
+  rr(ctx, -20, -26 + bob, 14, 10, 2);
+  ctx.fill();
+  ctx.stroke();
 
   ctx.restore();
 }
@@ -688,47 +1054,73 @@ function drawChef(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.save();
   ctx.translate(x, y);
 
-  // Hat
+  // Hat (toque)
   ctx.fillStyle = "#f0e8d8";
-  ctx.fillRect(-9, -22, 18, 10);
+  ctx.fillRect(-8, -22, 16, 8);
   ctx.beginPath();
-  ctx.arc(0, -22, 9, Math.PI, 0);
+  ctx.arc(0, -22, 8, Math.PI, 0);
   ctx.fill();
+  // Hat rim
+  ctx.fillStyle = "#e0d8c8";
+  ctx.fillRect(-9, -16, 18, 3);
 
-  // Body / apron
+  // Body (apron)
   ctx.fillStyle = "#f0e8d8";
-  ctx.fillRect(-10, 0, 20, 24);
-
-  // Apron strings
-  ctx.fillStyle = "#d0c8b0";
-  ctx.fillRect(-6, 6, 12, 14);
+  ctx.fillRect(-9, 0, 18, 22);
+  // Apron center band
+  ctx.fillStyle = "#e0d0b0";
+  ctx.fillRect(-5, 6, 10, 12);
 
   // Head
   ctx.fillStyle = "#d4a870";
   ctx.beginPath();
-  ctx.arc(0, -10, 9, 0, Math.PI * 2);
+  ctx.arc(0, -10, 8, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
 }
 
-function drawManager(ctx: CanvasRenderingContext2D, x: number, y: number) {
+function drawStaffFigure(ctx: CanvasRenderingContext2D, x: number, y: number, suitColor: string) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = suitColor;
+  ctx.fillRect(-8, 0, 16, 24);
+  ctx.fillStyle = "#d4a870";
+  ctx.beginPath();
+  ctx.arc(0, -8, 7, 0, Math.PI * 2);
+  ctx.fill();
+  // Clipboard
+  ctx.fillStyle = "#9a7040";
+  ctx.fillRect(8, 3, 8, 12);
+  ctx.restore();
+}
+
+function drawCustomer(ctx: CanvasRenderingContext2D, x: number, y: number, seed: number, time: number) {
   ctx.save();
   ctx.translate(x, y);
 
-  // Suit
-  ctx.fillStyle = "#2a3a5c";
-  ctx.fillRect(-9, 0, 18, 26);
+  const bob  = Math.sin(time * 5.5 + seed * 1.8) * 2;
+  const legs = Math.sin(time * 5.5 + seed * 1.8) * 7;
 
+  const bodyColors  = ["#c02828", "#2a5c34", "#2a4a8c", "#7a4018", "#5a2a7c"];
+  const skinColors  = ["#d4a870", "#b87840", "#e0b898", "#8c5228"];
+
+  // Body
+  ctx.fillStyle = bodyColors[seed % bodyColors.length];
+  ctx.fillRect(-7, -26 + bob, 14, 18);
   // Head
-  ctx.fillStyle = "#d4a870";
+  ctx.fillStyle = skinColors[seed % skinColors.length];
   ctx.beginPath();
-  ctx.arc(0, -8, 8, 0, Math.PI * 2);
+  ctx.arc(0, -32 + bob, 8, 0, Math.PI * 2);
   ctx.fill();
-
-  // Clipboard
-  ctx.fillStyle = "#7a6040";
-  ctx.fillRect(9, 4, 10, 14);
+  // Legs
+  ctx.strokeStyle = "#241e18";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-3, -8 + bob); ctx.lineTo(-5 + legs, 5); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(3, -8 + bob);  ctx.lineTo(5 - legs, 5);  ctx.stroke();
 
   ctx.restore();
 }
@@ -737,191 +1129,66 @@ function drawDrone(ctx: CanvasRenderingContext2D, x: number, y: number, time: nu
   ctx.save();
   ctx.translate(x, y);
 
+  // Arm struts
+  ctx.strokeStyle = "#2a4060";
+  ctx.lineWidth = 1.5;
+  for (const [ax, ay] of [[-18, -10], [18, -10], [-18, 10], [18, 10]]) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(ax, ay);
+    ctx.stroke();
+  }
+
   // Body
   ctx.fillStyle = "#1a2840";
   rr(ctx, -10, -5, 20, 10, 3);
   ctx.fill();
-  ctx.strokeStyle = "#2a4060";
+  ctx.strokeStyle = "#2a4866";
   ctx.lineWidth = 0.8;
   ctx.beginPath();
   rr(ctx, -10, -5, 20, 10, 3);
   ctx.stroke();
 
-  // Arms
-  ctx.strokeStyle = "#2a4060";
-  ctx.lineWidth = 1.5;
-  for (const [ax, ay] of [[-10, -5], [10, -5], [-10, 5], [10, 5]]) {
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(ax * 1.8, ay * 1.8);
-    ctx.stroke();
-  }
-
-  // Spinning props (blur as ellipses)
-  ctx.strokeStyle = "rgba(180,200,220,0.45)";
+  // Props (spinning ellipses)
+  ctx.strokeStyle = "rgba(180,200,220,0.4)";
   ctx.lineWidth = 1;
-  for (const [px, py] of [[-18, -9], [18, -9], [-18, 9], [18, 9]]) {
+  for (const [px, py] of [[-18, -10], [18, -10], [-18, 10], [18, 10]]) {
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(time * 18);
+    ctx.rotate(time * 20);
     ctx.beginPath();
-    ctx.ellipse(0, 0, 8, 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 9, 2, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
 
-  // Delivery box dangling
+  // Delivery box (hanging)
+  const swing = Math.sin(time * 2.5) * 2;
+  ctx.save();
+  ctx.translate(swing, 0);
   ctx.fillStyle = "#c09020";
   ctx.strokeStyle = "#907010";
   ctx.lineWidth = 0.8;
   rr(ctx, -6, 8, 12, 8, 2);
   ctx.fill();
   ctx.stroke();
-  // String
-  ctx.strokeStyle = "rgba(200,160,40,0.6)";
+  // Tether
+  ctx.strokeStyle = "rgba(180,140,30,0.6)";
   ctx.lineWidth = 0.8;
   ctx.beginPath();
   ctx.moveTo(0, 5);
-  ctx.lineTo(0, 8);
+  ctx.lineTo(swing * -0.5, 8);
   ctx.stroke();
+  ctx.restore();
 
   // LED blink
-  ctx.fillStyle = Math.sin(time * 9 + x * 0.05) > 0 ? "#ff3030" : "#550000";
+  const led = Math.sin(time * 9 + x * 0.04) > 0;
+  ctx.fillStyle = led ? "#ff3030" : "#3c0000";
+  if (led) { ctx.shadowColor = "#ff3030"; ctx.shadowBlur = 6; }
   ctx.beginPath();
   ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.restore();
-}
-
-// ── FOREGROUND ────────────────────────────────────────────
-
-function drawForeground(ctx: CanvasRenderingContext2D, W: number, H: number, time: number, stage: number) {
-  const groundY = H * 0.62;
-
-  // Customers
-  const custCount = 1 + Math.min(stage, 2);
-  for (let i = 0; i < custCount; i++) {
-    const dir   = i % 2 === 0 ? 1 : -1;
-    const speed = 0.35 + i * 0.12;
-    let xPos = ((time * speed * 45 * dir + i * (W / custCount)) % (W + 70)) - 35;
-    if (dir < 0) xPos = W - xPos;
-    drawCustomer(ctx, xPos, groundY - 8, i, time);
-  }
-
-  // Street lamps
-  drawLamp(ctx, W * 0.14, groundY, time);
-  drawLamp(ctx, W * 0.66, groundY, time);
-
-  // Flower pots
-  drawPot(ctx, W * 0.24, groundY - 4);
-  drawPot(ctx, W * 0.58, groundY - 4);
-}
-
-function drawCustomer(ctx: CanvasRenderingContext2D, x: number, y: number, seed: number, time: number) {
-  ctx.save();
-  ctx.translate(x, y);
-
-  const bob  = Math.sin(time * 5.5 + seed * 1.7) * 2;
-  const legs = Math.sin(time * 5.5 + seed * 1.7) * 6;
-
-  const bodyColors = ["#c02828", "#2c6c3c", "#3a6c9c", "#8a4a18", "#5c3a7c"];
-  const skinColors = ["#d4a870", "#c08040", "#e0b898", "#8a5228"];
-
-  // Body
-  ctx.fillStyle = bodyColors[seed % bodyColors.length];
-  ctx.fillRect(-8, -28 + bob, 16, 20);
-  // Head
-  ctx.fillStyle = skinColors[seed % skinColors.length];
-  ctx.beginPath();
-  ctx.arc(0, -34 + bob, 8, 0, Math.PI * 2);
-  ctx.fill();
-  // Legs
-  ctx.strokeStyle = "#2a2218";
-  ctx.lineWidth = 3.5;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-4, -8 + bob);
-  ctx.lineTo(-5 + legs, 6);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(4, -8 + bob);
-  ctx.lineTo(5 - legs, 6);
-  ctx.stroke();
-
-  ctx.restore();
-}
-
-function drawLamp(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
-  // Pole
-  ctx.strokeStyle = "#3a3830";
-  ctx.lineWidth = 3.5;
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x, y - 75);
-  ctx.lineTo(x + 18, y - 75);
-  ctx.stroke();
-
-  // Lamp head
-  ctx.fillStyle = "#2a2820";
-  ctx.fillRect(x + 10, y - 82, 22, 10);
-
-  // Light cone
-  const flicker = 0.72 + Math.sin(time * 2.8) * 0.04;
-  const cg = ctx.createRadialGradient(x + 21, y - 77, 0, x + 21, y - 55, 46);
-  cg.addColorStop(0, `rgba(255,220,100,${flicker * 0.55})`);
-  cg.addColorStop(1, "rgba(255,220,100,0)");
-  ctx.fillStyle = cg;
-  ctx.beginPath();
-  ctx.moveTo(x + 21, y - 77);
-  ctx.lineTo(x - 18, y - 20);
-  ctx.lineTo(x + 60, y - 20);
-  ctx.closePath();
-  ctx.fill();
-
-  // Bulb
-  ctx.fillStyle = `rgba(255,240,150,${flicker})`;
-  ctx.shadowColor = "#ffe060";
-  ctx.shadowBlur  = 8;
-  ctx.beginPath();
-  ctx.arc(x + 21, y - 77, 4.5, 0, Math.PI * 2);
-  ctx.fill();
   ctx.shadowBlur = 0;
-}
 
-function drawPot(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  // Pot
-  ctx.fillStyle = "#9c5c20";
-  ctx.beginPath();
-  ctx.moveTo(x - 9, y);
-  ctx.lineTo(x + 9, y);
-  ctx.lineTo(x + 6, y - 18);
-  ctx.lineTo(x - 6, y - 18);
-  ctx.closePath();
-  ctx.fill();
-
-  // Soil top
-  ctx.fillStyle = "#5a3a18";
-  ctx.fillRect(x - 7, y - 20, 14, 4);
-
-  // Stems
-  ctx.strokeStyle = "#2e7a3e";
-  ctx.lineWidth = 1.5;
-  for (let i = -2; i <= 2; i++) {
-    const h = 10 + Math.abs(i) * 2;
-    ctx.beginPath();
-    ctx.moveTo(x + i * 3, y - 20);
-    ctx.lineTo(x + i * 3, y - 20 - h);
-    ctx.stroke();
-  }
-
-  // Buds
-  ctx.fillStyle = "#c03030";
-  ctx.beginPath();
-  ctx.arc(x - 6, y - 30, 3.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#d4952a";
-  ctx.beginPath();
-  ctx.arc(x + 6, y - 28, 3.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.restore();
 }
