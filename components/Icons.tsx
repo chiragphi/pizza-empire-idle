@@ -21,21 +21,33 @@ const def = (size: number, color: string, sw: number, props: IconProps) => ({
 
 // ─── PIZZA (click target) ────────────────────────────────
 export function PizzaIcon(p: IconProps) {
+  const sz = p.size ?? 64;
+  const col = p.color ?? "#d4952a";
   return (
-    <svg {...def(64, "currentColor", 2, p)}>
-      {/* Outer crust circle */}
-      <circle cx="32" cy="32" r="28" strokeWidth={p.strokeWidth ?? 2.5} />
-      {/* Slice lines */}
-      <line x1="32" y1="4" x2="32" y2="60" />
-      <line x1="7.7" y1="18" x2="56.3" y2="46" />
-      <line x1="7.7" y1="46" x2="56.3" y2="18" />
-      {/* Toppings (pepperoni circles) */}
-      <circle cx="32" cy="22" r="3.5" fill={p.color ?? "currentColor"} stroke="none" />
-      <circle cx="22" cy="38" r="3" fill={p.color ?? "currentColor"} stroke="none" />
-      <circle cx="42" cy="38" r="3" fill={p.color ?? "currentColor"} stroke="none" />
-      <circle cx="32" cy="42" r="2.5" fill={p.color ?? "currentColor"} stroke="none" />
-      <circle cx="20" cy="26" r="2" fill={p.color ?? "currentColor"} stroke="none" />
-      <circle cx="44" cy="26" r="2" fill={p.color ?? "currentColor"} stroke="none" />
+    <svg width={sz} height={sz} viewBox="0 0 64 64" fill="none" className={p.className}>
+      {/* Crust ring */}
+      <circle cx="32" cy="32" r="30" fill="#8B5E27" />
+      {/* Sauce layer */}
+      <circle cx="32" cy="32" r="25" fill="#c0392b" />
+      {/* Cheese layer */}
+      <circle cx="32" cy="32" r="25" fill="#f5c842" opacity="0.85" />
+      {/* Slice cut lines */}
+      <line x1="32" y1="7" x2="32" y2="57" stroke="#8B5E27" strokeWidth="1.5" opacity="0.6" />
+      <line x1="9" y1="19.5" x2="55" y2="44.5" stroke="#8B5E27" strokeWidth="1.5" opacity="0.6" />
+      <line x1="9" y1="44.5" x2="55" y2="19.5" stroke="#8B5E27" strokeWidth="1.5" opacity="0.6" />
+      {/* Pepperoni */}
+      <circle cx="32" cy="20" r="4.5" fill="#c0392b" />
+      <circle cx="32" cy="20" r="3" fill="#a93226" />
+      <circle cx="21" cy="36" r="4" fill="#c0392b" />
+      <circle cx="21" cy="36" r="2.5" fill="#a93226" />
+      <circle cx="43" cy="36" r="4" fill="#c0392b" />
+      <circle cx="43" cy="36" r="2.5" fill="#a93226" />
+      <circle cx="32" cy="43" r="3.5" fill="#c0392b" />
+      <circle cx="32" cy="43" r="2" fill="#a93226" />
+      {/* Highlight */}
+      <circle cx="26" cy="24" r="5" fill="white" opacity="0.06" />
+      {/* Outer crust stroke */}
+      <circle cx="32" cy="32" r="30" stroke={col} strokeWidth="1.5" fill="none" />
     </svg>
   );
 }
