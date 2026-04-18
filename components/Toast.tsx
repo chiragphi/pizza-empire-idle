@@ -2,58 +2,44 @@
 
 import React, { useEffect, useRef } from "react";
 import { ToastMessage } from "@/lib/gameState";
+import { TrophyIcon, CheckIcon, InfoIcon, CoinIcon } from "./Icons";
 
-interface ToastProps {
-  toast: ToastMessage;
-  onDismiss: (id: string) => void;
-}
-
-const TOAST_ICONS: Record<ToastMessage["type"], string> = {
-  milestone: "🏆",
-  purchase: "✅",
-  unlock: "🔓",
-  info: "ℹ️",
+const ICON_MAP: Record<ToastMessage["type"], React.ReactNode> = {
+  milestone: <TrophyIcon size={14} />,
+  purchase:  <CheckIcon  size={14} />,
+  unlock:    <CoinIcon   size={14} />,
+  info:      <InfoIcon   size={14} />,
 };
 
-function ToastItem({ toast, onDismiss }: ToastProps) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+function ToastItem({ toast, onDismiss }: { toast: ToastMessage; onDismiss: (id: string) => void }) {
+  const ref = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    timerRef.current = setTimeout(() => {
-      onDismiss(toast.id);
-    }, 3000);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+    ref.current = setTimeout(() => onDismiss(toast.id), 3200);
+    return () => { if (ref.current) clearTimeout(ref.current); };
   }, [toast.id, onDismiss]);
 
   return (
     <div
-      className={`toast ${toast.type} ${toast.exiting ? "exiting" : ""}`}
-      role="alert"
-      aria-live="polite"
+      className={`toast-item toast-${toast.type} ${toast.exiting ? "is-exiting" : ""}`}
       onClick={() => onDismiss(toast.id)}
-      style={{ cursor: "pointer" }}
+      role="status"
+      aria-live="polite"
     >
-      <span className="text-xl shrink-0">{toast.icon || TOAST_ICONS[toast.type]}</span>
-      <span
-        className="text-sm text-cream/90 leading-tight"
-        style={{ fontFamily: "var(--font-body)" }}
-      >
-        {toast.message}
-      </span>
+      <div className="toast-icon">{ICON_MAP[toast.type]}</div>
+      <span className="toast-text">{toast.message}</span>
     </div>
   );
 }
 
-interface ToastContainerProps {
+interface Props {
   toasts: ToastMessage[];
   onDismiss: (id: string) => void;
 }
 
-export default function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
+export default function ToastContainer({ toasts, onDismiss }: Props) {
   return (
-    <div className="toast-container" aria-label="Notifications">
+    <div className="toast-stack" aria-label="Notifications">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onDismiss={onDismiss} />
       ))}

@@ -10,12 +10,11 @@ export interface Particle {
   color: string;
   rotation: number;
   rotationSpeed: number;
-  emoji?: string;
 }
 
 const COIN_COLORS = ["#ffe94a", "#ffd700", "#ffb300", "#fff176"];
 const CONFETTI_COLORS = ["#e8352a", "#ffe94a", "#2d6a4f", "#faf7f0", "#f59e0b", "#60a5fa"];
-const PIZZA_EMOJIS = ["🍕", "🧀", "🍅", "🔥"];
+// No emojis — pizza particles are rendered as geometric shapes
 
 export function createClickParticles(
   x: number,
@@ -27,7 +26,7 @@ export function createClickParticles(
   for (let i = 0; i < count; i++) {
     const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
     const speed = 2 + Math.random() * 4;
-    const isEmoji = i < 2;
+    const isPizza = i < 2;
 
     particles.push({
       x,
@@ -36,12 +35,11 @@ export function createClickParticles(
       vy: Math.sin(angle) * speed - 2,
       life: 1,
       maxLife: 1,
-      size: isEmoji ? 16 : 8 + Math.random() * 8,
-      type: isEmoji ? "pizza" : "coin",
-      color: COIN_COLORS[Math.floor(Math.random() * COIN_COLORS.length)],
+      size: isPizza ? 14 : 8 + Math.random() * 8,
+      type: isPizza ? "pizza" : "coin",
+      color: isPizza ? "#d4952a" : COIN_COLORS[Math.floor(Math.random() * COIN_COLORS.length)],
       rotation: Math.random() * Math.PI * 2,
       rotationSpeed: (Math.random() - 0.5) * 0.3,
-      emoji: isEmoji ? PIZZA_EMOJIS[Math.floor(Math.random() * PIZZA_EMOJIS.length)] : undefined,
     });
   }
 
@@ -171,17 +169,23 @@ export function drawParticle(ctx: CanvasRenderingContext2D, p: Particle): void {
     ctx.arc(0, 0, p.size, 0, Math.PI * 2);
     ctx.fill();
   } else if (p.type === "pizza") {
-    if (p.emoji) {
-      ctx.font = `${p.size}px serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(p.emoji, 0, 0);
-    } else {
-      ctx.fillStyle = "#ffe94a";
-      ctx.beginPath();
-      ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // Pizza slice as geometric shape — circle with slice lines
+    const r = p.size / 2;
+    ctx.fillStyle = p.color;
+    ctx.strokeStyle = "rgba(0,0,0,0.3)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Slice lines
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(0, -r);
+    ctx.moveTo(0, 0); ctx.lineTo(r * 0.87, r * 0.5);
+    ctx.moveTo(0, 0); ctx.lineTo(-r * 0.87, r * 0.5);
+    ctx.stroke();
   } else if (p.type === "coin") {
     ctx.fillStyle = p.color;
     ctx.strokeStyle = "rgba(0,0,0,0.3)";

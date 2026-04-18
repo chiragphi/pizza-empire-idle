@@ -4,159 +4,121 @@ import React from "react";
 import { MILESTONES } from "@/lib/milestones";
 import { GameState } from "@/lib/gameState";
 import { formatCoins } from "@/lib/formatNumber";
+import { CheckIcon, TrophyIcon, StarIcon } from "./Icons";
 
-interface MilestoneLogProps {
-  gameState: GameState;
-}
-
-function getMilestoneProgress(milestoneId: string, state: GameState): number {
-  switch (milestoneId) {
-    case "first_hundred":
-      return Math.min(1, state.totalCoinsEarned / 100);
-    case "hired_help":
-      return Object.values(state.workers).some((w) => w.count > 0) ? 1 : 0;
-    case "second_location":
-      return state.upgrades["second_location"]?.owned ? 1 : 0;
-    case "going_viral":
-      return Math.min(1, state.totalCoinsEarned / 50000);
-    case "drone_launch":
-      return state.upgrades["drone_delivery"]?.owned ? 1 : 0;
-    case "pizza_empire":
-      return Math.min(1, state.totalCoinsEarned / 1000000);
-    default:
-      return 0;
+function getMilestoneProgress(id: string, state: GameState): number {
+  switch (id) {
+    case "first_hundred":   return Math.min(1, state.totalCoinsEarned / 100);
+    case "hired_help":      return Object.values(state.workers).some((w) => w.count > 0) ? 1 : 0;
+    case "second_location": return state.upgrades["second_location"]?.owned ? 1 : 0;
+    case "going_viral":     return Math.min(1, state.totalCoinsEarned / 50000);
+    case "drone_launch":    return state.upgrades["drone_delivery"]?.owned ? 1 : 0;
+    case "pizza_empire":    return Math.min(1, state.totalCoinsEarned / 1000000);
+    default:                return 0;
   }
 }
 
-function getMilestoneProgressLabel(milestoneId: string, state: GameState): string {
-  switch (milestoneId) {
-    case "first_hundred":
-      return `${formatCoins(Math.min(state.totalCoinsEarned, 100))} / 100`;
-    case "hired_help":
-      return Object.values(state.workers).some((w) => w.count > 0) ? "Done!" : "0 workers";
-    case "second_location":
-      return state.upgrades["second_location"]?.owned ? "Done!" : "Buy upgrade";
-    case "going_viral":
-      return `${formatCoins(Math.min(state.totalCoinsEarned, 50000))} / 50K`;
-    case "drone_launch":
-      return state.upgrades["drone_delivery"]?.owned ? "Done!" : "Buy upgrade";
-    case "pizza_empire":
-      return `${formatCoins(Math.min(state.totalCoinsEarned, 1000000))} / 1M`;
-    default:
-      return "";
+function getMilestoneLabel(id: string, state: GameState): string {
+  switch (id) {
+    case "first_hundred":   return `${formatCoins(Math.min(state.totalCoinsEarned, 100))} / 100`;
+    case "hired_help":      return Object.values(state.workers).some((w) => w.count > 0) ? "Done" : "Hire anyone";
+    case "second_location": return state.upgrades["second_location"]?.owned ? "Done" : "Buy upgrade";
+    case "going_viral":     return `${formatCoins(Math.min(state.totalCoinsEarned, 50000))} / 50K`;
+    case "drone_launch":    return state.upgrades["drone_delivery"]?.owned ? "Done" : "Buy upgrade";
+    case "pizza_empire":    return `${formatCoins(Math.min(state.totalCoinsEarned, 1_000_000))} / 1M`;
+    default:                return "";
   }
 }
 
-export default function MilestoneLog({ gameState }: MilestoneLogProps) {
+interface Props { gameState: GameState; }
+
+export default function MilestoneLog({ gameState }: Props) {
   const { milestones } = gameState;
-
   const completed = MILESTONES.filter((m) => milestones[m.id]?.unlocked);
-  const upcoming = MILESTONES.filter((m) => !milestones[m.id]?.unlocked);
+  const upcoming  = MILESTONES.filter((m) => !milestones[m.id]?.unlocked);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-3 pt-3 pb-1 shrink-0">
-        <div className="panel-header text-sm flex items-center justify-between">
-          <span>🏆 Milestones</span>
-          <span className="text-xs text-cream/40 font-body font-normal">
-            {completed.length}/{MILESTONES.length}
-          </span>
-        </div>
+    <>
+      <div className="panel-head">
+        <span className="panel-title">
+          <TrophyIcon size={14} color="var(--c-gold)" />
+          Milestones
+        </span>
+        <span className="panel-badge">{completed.length}/{MILESTONES.length}</span>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto px-3 pb-3"
-        style={{ scrollbarWidth: "thin" }}
-      >
-        {/* Next upcoming */}
-        {upcoming.length > 0 && (
-          <div className="mb-3">
-            {upcoming.slice(0, 2).map((m) => {
-              const progress = getMilestoneProgress(m.id, gameState);
-              const label = getMilestoneProgressLabel(m.id, gameState);
-              return (
-                <div
-                  key={m.id}
-                  className="mb-2 p-2.5 rounded-lg"
-                  style={{
-                    background: "rgba(255,233,74,0.05)",
-                    border: "1px solid rgba(255,233,74,0.15)",
-                  }}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-base">{m.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className="text-xs font-semibold text-cream/80 truncate"
-                        style={{ fontFamily: "var(--font-body)" }}
-                      >
-                        {m.name}
-                      </div>
-                      <div
-                        className="text-xs text-cream/40 truncate"
-                        style={{ fontFamily: "var(--font-body)" }}
-                      >
-                        {m.description}
-                      </div>
-                    </div>
+      <div className="panel-body">
+        {/* Next 2 upcoming */}
+        {upcoming.slice(0, 2).map((m) => {
+          const progress = getMilestoneProgress(m.id, gameState);
+          const label    = getMilestoneLabel(m.id, gameState);
+
+          return (
+            <div key={m.id} className="milestone-item is-next">
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <StarIcon size={14} color="var(--c-gold)" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--c-cream)" }}>
+                    {m.name}
                   </div>
-                  {/* Progress bar */}
-                  <div className="milestone-progress">
-                    <div
-                      className="milestone-progress-fill"
-                      style={{ width: `${progress * 100}%` }}
-                    />
-                  </div>
-                  <div
-                    className="text-xs text-cream/40 mt-1 text-right tabular-nums"
-                    style={{ fontFamily: "var(--font-body)" }}
-                  >
-                    {label}
+                  <div style={{ fontSize: "0.63rem", color: "var(--c-dim)", marginTop: 1 }}>
+                    {m.description}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </div>
+              {/* Progress bar */}
+              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${progress * 100}%`,
+                    background: "linear-gradient(90deg, var(--c-red), var(--c-gold))",
+                    borderRadius: 2,
+                    transition: "width 0.4s ease",
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: "0.62rem", color: "var(--c-dim)", marginTop: 3, textAlign: "right" }}>
+                {label}
+              </div>
+            </div>
+          );
+        })}
 
         {/* Completed */}
         {completed.length > 0 && (
-          <div>
+          <>
             <div
-              className="text-xs text-cream/30 mb-1.5 font-semibold uppercase tracking-wider"
-              style={{ fontFamily: "var(--font-body)" }}
+              style={{
+                fontSize: "0.6rem",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: "var(--c-ghost)",
+                padding: "4px 2px",
+              }}
             >
               Completed
             </div>
             {[...completed].reverse().map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-2 py-1.5 px-2 rounded-lg mb-1"
-                style={{
-                  background: "rgba(45,106,79,0.1)",
-                  border: "1px solid rgba(45,106,79,0.2)",
-                }}
-              >
-                <span className="text-sm">{m.icon}</span>
-                <div className="flex-1 min-w-0">
-                  <div
-                    className="text-xs font-semibold text-basil/90 truncate"
-                    style={{ fontFamily: "var(--font-body)" }}
-                  >
-                    ✓ {m.name}
-                  </div>
+              <div key={m.id} className="milestone-item is-done">
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <CheckIcon size={13} color="var(--c-green-hi)" />
+                  <span style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--c-dim)" }}>
+                    {m.name}
+                  </span>
                 </div>
               </div>
             ))}
-          </div>
+          </>
         )}
 
         {completed.length === 0 && upcoming.length === 0 && (
-          <div className="text-center text-cream/30 text-xs py-4">
-            Start clicking to unlock milestones!
-          </div>
+          <p style={{ fontSize: "0.72rem", color: "var(--c-ghost)", textAlign: "center", padding: "16px 0" }}>
+            Start tossing to unlock milestones.
+          </p>
         )}
       </div>
-    </div>
+    </>
   );
 }

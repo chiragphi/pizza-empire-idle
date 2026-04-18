@@ -4,104 +4,125 @@ import React from "react";
 import { WORKERS, Worker, getWorkerCost } from "@/lib/workers";
 import { GameState } from "@/lib/gameState";
 import { formatCoins, formatCps } from "@/lib/formatNumber";
+import { LockIcon, PlusIcon } from "./Icons";
+import {
+  ScooterIcon, CookIcon, ChefHatIcon, ClipboardIcon,
+  BriefcaseIcon, BuildingIcon, ExecutiveIcon,
+} from "./Icons";
 
-interface WorkersPanelProps {
-  gameState: GameState;
-  onBuyWorker: (id: string, count?: number) => void;
-}
+const WORKER_ICONS: Record<string, React.FC<{ size?: number; color?: string }>> = {
+  pizza_boy:        ScooterIcon,
+  line_cook:        CookIcon,
+  head_chef:        ChefHatIcon,
+  kitchen_manager:  ClipboardIcon,
+  restaurant_manager: BriefcaseIcon,
+  regional_director:  BuildingIcon,
+  corporate_exec:     ExecutiveIcon,
+};
 
 function WorkerCard({
-  worker,
-  count,
-  cost,
-  canAfford,
-  visible,
-  totalCps,
-  onBuy,
+  worker, count, cost, canAfford, visible, cpsShare, totalCps, onBuy,
 }: {
   worker: Worker;
   count: number;
   cost: number;
   canAfford: boolean;
   visible: boolean;
+  cpsShare: number; // fraction of total income
   totalCps: number;
-  onBuy: (amt: number) => void;
+  onBuy: () => void;
 }) {
   const locked = !visible && count === 0;
-
-  let cardClass = "worker-card p-3 mb-2";
-  if (locked) cardClass += " locked";
-  else if (canAfford) cardClass += " affordable";
+  const Icon = WORKER_ICONS[worker.id] ?? CookIcon;
+  const workerCps = worker.baseCps * count;
 
   return (
-    <div className={cardClass}>
-      <div className="flex items-start gap-2.5">
-        {/* Big count + icon */}
-        <div className="flex flex-col items-center gap-0.5 shrink-0">
+    <div className={`card worker-card ${locked ? "is-locked" : ""}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Icon + count */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, flexShrink: 0 }}>
           <div
-            className="text-2xl w-9 h-9 flex items-center justify-center rounded-lg"
             style={{
-              background: count > 0 ? "rgba(232,53,42,0.15)" : "rgba(255,255,255,0.04)",
-              fontSize: "1.4rem",
+              width: 38,
+              height: 38,
+              borderRadius: 8,
+              background: count > 0 ? "var(--c-red-soft)" : "var(--c-raised)",
+              border: `1px solid ${count > 0 ? "rgba(232,53,42,0.25)" : "var(--c-border)"}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: count > 0 ? "var(--c-red)" : "var(--c-ghost)",
             }}
           >
-            {locked ? "🔒" : worker.icon}
+            {locked ? <LockIcon size={16} /> : <Icon size={20} />}
           </div>
           {count > 0 && (
             <span
-              className="text-xs font-bold text-neon tabular-nums"
-              style={{ fontFamily: "var(--font-body)" }}
+              className="worker-count-badge has-workers"
+              aria-label={`${count} hired`}
             >
-              ×{count}
+              {count}
             </span>
           )}
         </div>
 
         {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-1">
-            <div>
-              <span
-                className="font-semibold text-sm text-cream/90"
-                style={{ fontFamily: "var(--font-body)" }}
-              >
-                {locked ? "???" : worker.name}
-              </span>
-              {!locked && (
-                <div className="text-xs text-cream/45 mt-0.5">
-                  {formatCps(worker.baseCps)}/sec each
-                  {count > 0 && (
-                    <span className="text-basil ml-1.5 font-semibold">
-                      = {formatCps(totalCps)}/sec
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+            <span
+              style={{
+                fontSize: "0.78rem",
+                fontWeight: 600,
+                color: "var(--c-cream)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {locked ? "???" : worker.name}
+            </span>
             {!locked && (
-              <div className="flex gap-1 shrink-0">
-                <button
-                  className={`text-xs px-2 py-1 rounded font-semibold transition-all ${
-                    canAfford
-                      ? "bg-tomato/80 text-mozz hover:bg-tomato cursor-pointer"
-                      : "bg-white/5 text-cream/30 cursor-not-allowed"
-                  }`}
-                  style={{ fontFamily: "var(--font-body)" }}
-                  onClick={() => canAfford && onBuy(1)}
-                  disabled={!canAfford}
-                  aria-label={`Hire 1 ${worker.name}`}
-                >
-                  🪙 {formatCoins(cost)}
-                </button>
-              </div>
+              <button
+                className={`hire-btn ${canAfford ? "affordable" : ""}`}
+                onClick={onBuy}
+                disabled={!canAfford}
+                aria-label={`Hire ${worker.name} for ${formatCoins(cost)}`}
+              >
+                <PlusIcon size={10} />
+                {formatCoins(cost)}
+              </button>
             )}
           </div>
 
-          {!locked && count === 0 && (
-            <p className="text-xs text-cream/40 mt-1 leading-tight line-clamp-1">
-              {worker.description}
-            </p>
+          {!locked && (
+            <>
+              <div
+                style={{
+                  fontSize: "0.65rem",
+                  color: "var(--c-dim)",
+                  marginTop: 2,
+                  display: "flex",
+                  gap: 8,
+                }}
+              >
+                <span>{formatCps(worker.baseCps)}/s each</span>
+                {count > 0 && (
+                  <span style={{ color: "var(--c-gold)", fontWeight: 600 }}>
+                    = {formatCps(workerCps)}/s
+                  </span>
+                )}
+              </div>
+
+              {/* CPS contribution bar */}
+              {count > 0 && totalCps > 0 && (
+                <div className="cps-bar">
+                  <div
+                    className="cps-bar-fill"
+                    style={{ width: `${Math.max(3, cpsShare * 100)}%` }}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -109,26 +130,33 @@ function WorkerCard({
   );
 }
 
-export default function WorkersPanel({ gameState, onBuyWorker }: WorkersPanelProps) {
+interface Props {
+  gameState: GameState;
+  onBuyWorker: (id: string, count?: number) => void;
+}
+
+export default function WorkersPanel({ gameState, onBuyWorker }: Props) {
   const { coins, totalCoinsEarned, workers, coinsPerSecond } = gameState;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-3 pt-3 pb-1 shrink-0">
-        <div className="panel-header text-sm flex items-center justify-between">
-          <span>👥 Staff</span>
-          <span className="text-xs text-cream/40 font-body font-normal">
-            {formatCps(coinsPerSecond)}/sec total
-          </span>
-        </div>
+    <>
+      <div className="panel-head">
+        <span className="panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ color: "var(--c-red)" }}>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          Staff
+        </span>
+        <span className="panel-badge">
+          {formatCps(coinsPerSecond)}/s
+        </span>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto px-3 pb-3"
-        style={{ scrollbarWidth: "thin" }}
-        role="list"
-        aria-label="Available workers"
-      >
+      <div className="panel-body">
         {WORKERS.map((worker) => {
           const count = workers[worker.id]?.count ?? 0;
           const cost = getWorkerCost(worker, count);
@@ -137,7 +165,8 @@ export default function WorkersPanel({ gameState, onBuyWorker }: WorkersPanelPro
             !worker.requiredCoins ||
             totalCoinsEarned >= (worker.requiredCoins ?? 0) ||
             count > 0;
-          const totalCps = worker.baseCps * count;
+          const workerCps = worker.baseCps * count;
+          const cpsShare = coinsPerSecond > 0 ? workerCps / coinsPerSecond : 0;
 
           return (
             <WorkerCard
@@ -147,12 +176,13 @@ export default function WorkersPanel({ gameState, onBuyWorker }: WorkersPanelPro
               cost={cost}
               canAfford={canAfford}
               visible={visible}
-              totalCps={totalCps}
-              onBuy={(amt) => onBuyWorker(worker.id, amt)}
+              cpsShare={cpsShare}
+              totalCps={coinsPerSecond}
+              onBuy={() => onBuyWorker(worker.id, 1)}
             />
           );
         })}
       </div>
-    </div>
+    </>
   );
 }

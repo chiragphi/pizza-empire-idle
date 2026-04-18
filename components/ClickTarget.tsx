@@ -1,216 +1,156 @@
 "use client";
 
-import React, { useRef, useCallback } from "react";
-import { formatCoins } from "@/lib/formatNumber";
+import React, { useRef, useCallback, useState, useEffect } from "react";
+import { formatCoins, formatCps } from "@/lib/formatNumber";
+import { PizzaIcon, BoltIcon, TrendIcon } from "./Icons";
 
-interface ClickTargetProps {
+interface Props {
   clickValue: number;
+  coinsPerSecond: number;
   totalClicks: number;
   onClickPizza: (x: number, y: number) => void;
 }
 
-interface FlyingNumber {
+interface FlyNum {
   id: number;
   x: number;
   y: number;
   value: number;
 }
 
-let flyId = 0;
+let _fid = 0;
 
-export default function ClickTarget({ clickValue, totalClicks, onClickPizza }: ClickTargetProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [flyingNums, setFlyingNums] = React.useState<FlyingNumber[]>([]);
-  const [isPressed, setIsPressed] = React.useState(false);
+export default function ClickTarget({ clickValue, coinsPerSecond, totalClicks, onClickPizza }: Props) {
+  const [pressing, setPressing] = useState(false);
+  const [pulseKey, setPulseKey] = useState(0);
+  const [flyNums, setFlyNums] = useState<FlyNum[]>([]);
+  const [combo, setCombo] = useState(0);
+  const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const btnRef = useRef<HTMLDivElement>(null);
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
+  // Combo system
+  const bumpCombo = useCallback(() => {
+    setCombo((c) => c + 1);
+    if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+    comboTimerRef.current = setTimeout(() => setCombo(0), 1200);
+  }, []);
+
+  useEffect(() => () => { if (comboTimerRef.current) clearTimeout(comboTimerRef.current); }, []);
+
+  const handleActivate = useCallback((clientX: number, clientY: number) => {
+    onClickPizza(clientX, clientY);
+    bumpCombo();
+
+    // Visual feedback
+    setPressing(true);
+    setPulseKey((k) => k + 1);
+    setTimeout(() => setPressing(false), 90);
+
+    // Fly number
+    const id = _fid++;
+    const jitter = (Math.random() - 0.5) * 60;
+    setFlyNums((prev) => [
+      ...prev.slice(-10),
+      { id, x: clientX + jitter, y: clientY - 10, value: clickValue },
+    ]);
+    setTimeout(() => setFlyNums((prev) => prev.filter((n) => n.id !== id)), 850);
+  }, [onClickPizza, bumpCombo]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    handleActivate(e.clientX, e.clientY);
+  }, [handleActivate]);
+
+  const handleTouch = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    handleActivate(t.clientX, t.clientY);
+  }, [handleActivate]);
+
+  const handleKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
+      const rect = btnRef.current?.getBoundingClientRect();
+      if (rect) handleActivate(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+  }, [handleActivate]);
 
-      let cx: number, cy: number;
-      if ("touches" in e && e.touches.length > 0) {
-        cx = e.touches[0].clientX - rect.left;
-        cy = e.touches[0].clientY - rect.top;
-      } else if ("clientX" in e) {
-        cx = e.clientX - rect.left;
-        cy = e.clientY - rect.top;
-      } else {
-        cx = rect.width / 2;
-        cy = rect.height / 2;
-      }
-
-      onClickPizza(cx + rect.left, cy + rect.top);
-
-      const id = flyId++;
-      const offsetX = (Math.random() - 0.5) * 80;
-      setFlyingNums((prev) => [
-        ...prev.slice(-8),
-        { id, x: cx + offsetX, y: cy - 20, value: clickValue },
-      ]);
-      setTimeout(() => {
-        setFlyingNums((prev) => prev.filter((n) => n.id !== id));
-      }, 900);
-    },
-    [onClickPizza, clickValue]
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-          onClickPizza(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        }
-      }
-    },
-    [onClickPizza]
-  );
+  const comboLabel = combo >= 20 ? "FRENZY" : combo >= 10 ? "HOT" : combo >= 5 ? "COMBO" : null;
 
   return (
-    <div
-      ref={containerRef}
-      className="flex flex-col items-center justify-center gap-4 py-6 select-none"
-    >
-      {/* The Pizza Button */}
-      <div className="relative flex flex-col items-center gap-3">
-        {/* Glow ring */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            width: 160,
-            height: 160,
-            background: "radial-gradient(circle, rgba(255,233,74,0.15) 0%, transparent 70%)",
-            animation: "pizzaFloat 4s ease-in-out infinite",
-            pointerEvents: "none",
-          }}
-        />
-
-        <button
-          className="pizza-click-btn focus:outline-none focus:ring-2 focus:ring-neon focus:ring-offset-2 focus:ring-offset-navy rounded-full"
-          onClick={handleClick}
-          onMouseDown={() => setIsPressed(true)}
-          onMouseUp={() => setIsPressed(false)}
-          onMouseLeave={() => setIsPressed(false)}
-          onTouchStart={() => setIsPressed(true)}
-          onTouchEnd={(e) => {
-            setIsPressed(false);
-            handleClick(e);
-          }}
-          onKeyDown={handleKeyDown}
-          aria-label="Toss pizza dough"
-          title={`Click to earn ${formatCoins(clickValue)} coins`}
-          style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-          }}
-        >
-          <div
-            className="relative"
-            style={{
-              width: 140,
-              height: 140,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {/* Drop shadow plate */}
-            <div
-              className="absolute bottom-0 left-1/2 -translate-x-1/2"
-              style={{
-                width: 110,
-                height: 20,
-                background: "radial-gradient(ellipse, rgba(0,0,0,0.4) 0%, transparent 70%)",
-                borderRadius: "50%",
-                transform: `translateX(-50%) scaleY(${isPressed ? 0.5 : 1})`,
-                transition: "transform 0.08s ease",
-              }}
-            />
-
-            {/* Pizza emoji */}
-            <span
-              className="pizza-emoji"
-              style={{
-                fontSize: isPressed ? 90 : 100,
-                lineHeight: 1,
-                transition: "font-size 0.08s ease",
-                display: "block",
-                textShadow: "0 4px 20px rgba(232,53,42,0.5)",
-                filter: "drop-shadow(0 6px 12px rgba(232,53,42,0.4))",
-              }}
-            >
-              🍕
-            </span>
-
-            {/* Spin ring on press */}
-            {isPressed && (
-              <div
-                className="absolute inset-0 rounded-full border-2 border-neon/40"
-                style={{
-                  animation: "spin 0.4s linear",
-                }}
-              />
-            )}
-          </div>
-        </button>
-
-        {/* Click value badge */}
-        <div
-          className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-          style={{
-            background: "rgba(255,233,74,0.1)",
-            border: "1px solid rgba(255,233,74,0.2)",
-          }}
-        >
-          <span className="text-neon text-xs font-body font-semibold">
-            +{formatCoins(clickValue)} per toss
-          </span>
+    <div className="click-stage">
+      {/* Combo badge */}
+      {comboLabel && (
+        <div key={combo} className="combo-badge">
+          {comboLabel} x{combo}
         </div>
+      )}
 
-        <div className="text-cream/30 text-xs font-body">
-          {totalClicks.toLocaleString()} tosses total
+      {/* Pizza button */}
+      <div
+        ref={btnRef}
+        className="pizza-btn-wrap"
+        role="button"
+        tabIndex={0}
+        aria-label={`Toss pizza — earn ${formatCoins(clickValue)} coins`}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouch}
+        onKeyDown={handleKey}
+        style={{ outline: "none" }}
+      >
+        {/* Rings */}
+        <div className="pizza-ring-outer" />
+        <div className="pizza-ring-inner" />
+
+        {/* Pulse rings on click */}
+        {pulseKey > 0 && (
+          <div key={pulseKey} className="pizza-pulse" />
+        )}
+
+        {/* Core */}
+        <div className={`pizza-btn-core ${pressing ? "pressing" : ""}`}>
+          <PizzaIcon
+            className="pizza-svg"
+            size={82}
+            color={pressing ? "var(--c-gold-hi)" : "var(--c-gold)"}
+          />
         </div>
       </div>
 
-      {/* Flying coin numbers */}
-      {flyingNums.map((fn) => (
+      {/* Stats strip */}
+      <div className="click-stats">
+        <div className="click-stat">
+          <span className="click-stat-value" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <BoltIcon size={12} color="var(--c-gold-hi)" />
+            {formatCoins(clickValue)}
+          </span>
+          <span className="click-stat-label">per click</span>
+        </div>
+        <div className="click-divider" />
+        <div className="click-stat">
+          <span className="click-stat-value" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <TrendIcon size={12} color="var(--c-gold-hi)" />
+            {formatCps(coinsPerSecond)}
+          </span>
+          <span className="click-stat-label">per second</span>
+        </div>
+        <div className="click-divider" />
+        <div className="click-stat">
+          <span className="click-stat-value">{totalClicks.toLocaleString()}</span>
+          <span className="click-stat-label">tosses</span>
+        </div>
+      </div>
+
+      {/* Fly numbers (portaled to fixed) */}
+      {flyNums.map((fn) => (
         <div
           key={fn.id}
-          className="pointer-events-none absolute font-display font-bold text-neon select-none"
-          style={{
-            left: fn.x,
-            top: fn.y,
-            fontSize: "1.1rem",
-            zIndex: 50,
-            textShadow: "0 0 8px rgba(255,233,74,0.8)",
-            animation: "flyUp 0.85s ease-out forwards",
-            transform: "translateX(-50%)",
-          }}
+          className="fly-number"
+          style={{ left: fn.x, top: fn.y }}
         >
-          +{formatCoins(fn.value)}
+          +{formatCoins(clickValue)}
         </div>
       ))}
-
-      <style jsx>{`
-        @keyframes flyUp {
-          0% {
-            transform: translateX(-50%) translateY(0) scale(1);
-            opacity: 1;
-          }
-          60% {
-            transform: translateX(-50%) translateY(-55px) scale(1.1);
-            opacity: 0.9;
-          }
-          100% {
-            transform: translateX(-50%) translateY(-90px) scale(0.7);
-            opacity: 0;
-          }
-        }
-      `}</style>
     </div>
   );
 }

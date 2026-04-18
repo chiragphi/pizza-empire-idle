@@ -3,74 +3,85 @@
 import React, { useState, useEffect, useRef } from "react";
 import { formatCoins, formatCps } from "@/lib/formatNumber";
 import { getEmpireRank } from "@/lib/milestones";
+import { CrownIcon, GearIcon, TrendIcon, BoltIcon, CoinIcon } from "./Icons";
 
 interface HUDProps {
   coins: number;
+  clickValue: number;
   coinsPerSecond: number;
   totalCoinsEarned: number;
   onSettings: () => void;
 }
 
-export default function HUD({ coins, coinsPerSecond, totalCoinsEarned, onSettings }: HUDProps) {
-  const [displayCoins, setDisplayCoins] = useState(coins);
-  const [ticking, setTicking] = useState(false);
-  const prevCoinsRef = useRef(coins);
-  const rank = getEmpireRank(totalCoinsEarned);
+export default function HUD({ coins, clickValue, coinsPerSecond, totalCoinsEarned, onSettings }: HUDProps) {
+  const [animKey, setAnimKey] = useState(0);
+  const prevRef = useRef(coins);
+  const { title: rankTitle } = getEmpireRank(totalCoinsEarned);
 
   useEffect(() => {
-    if (Math.abs(coins - prevCoinsRef.current) > 0.01) {
-      setTicking(true);
-      const t = setTimeout(() => setTicking(false), 150);
-      setDisplayCoins(coins);
-      prevCoinsRef.current = coins;
-      return () => clearTimeout(t);
+    if (Math.abs(coins - prevRef.current) > 0.5) {
+      setAnimKey((k) => k + 1);
+      prevRef.current = coins;
     }
   }, [coins]);
 
   return (
-    <div className="hud-bar px-4 py-2 flex items-center justify-between gap-4 select-none">
+    <header className="hud">
       {/* Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <span className="text-xl">🍕</span>
-        <span
-          className="font-display font-bold text-sm md:text-base neon-text"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Pizza Empire
-        </span>
+      <div className="hud-logo" style={{ minWidth: 130 }}>
+        <CoinIcon size={16} color="var(--c-gold)" />
+        Pizza Empire
       </div>
 
       {/* Coins */}
-      <div className="flex flex-col items-center gap-0.5 flex-1 min-w-0">
-        <div
-          className={`coin-display text-2xl md:text-3xl font-bold tabular-nums ${ticking ? "number-tick updating" : "number-tick"}`}
+      <div className="hud-stat" style={{ flex: 1 }}>
+        <span className="hud-stat-label">Coins</span>
+        <span
+          key={animKey}
+          className="hud-stat-value gold-shimmer num-pop"
+          style={{ fontSize: "1.15rem" }}
+          aria-live="polite"
+          aria-label={`${Math.floor(coins)} coins`}
         >
-          🪙 {formatCoins(displayCoins)}
-        </div>
-        <div className="text-xs text-cream/60 font-body">
-          {formatCps(coinsPerSecond)}/sec
-        </div>
+          {formatCoins(coins)}
+        </span>
       </div>
 
-      {/* Empire rank */}
-      <div className="hidden sm:flex flex-col items-end gap-1 shrink-0">
-        <div className="empire-rank text-xs font-display">
-          {rank.emoji} {rank.title}
-        </div>
-        <div className="text-xs text-cream/40 font-body tabular-nums">
-          Total: {formatCoins(totalCoinsEarned)}
-        </div>
+      {/* Per click */}
+      <div className="hud-stat" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 70 }}>
+        <span className="hud-stat-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <BoltIcon size={9} color="var(--c-dim)" /> Per Click
+        </span>
+        <span className="hud-stat-value" style={{ fontSize: "0.85rem" }}>
+          {formatCoins(clickValue)}
+        </span>
+      </div>
+
+      {/* Per second */}
+      <div className="hud-stat" style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 80 }}>
+        <span className="hud-stat-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <TrendIcon size={9} color="var(--c-dim)" /> Per Second
+        </span>
+        <span className="hud-stat-value" style={{ fontSize: "0.85rem" }}>
+          {formatCps(coinsPerSecond)}
+        </span>
+      </div>
+
+      {/* Rank */}
+      <div className="hud-rank" style={{ display: "flex" }}>
+        <CrownIcon size={13} color="var(--c-gold-hi)" />
+        <span className="hud-rank-text">{rankTitle}</span>
       </div>
 
       {/* Settings */}
       <button
+        className="icon-btn"
         onClick={onSettings}
-        className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-cream/60 hover:text-cream hover:bg-white/10 transition-all text-base"
+        aria-label="Settings"
         title="Settings"
-        aria-label="Open settings"
       >
-        ⚙️
+        <GearIcon size={16} />
       </button>
-    </div>
+    </header>
   );
 }

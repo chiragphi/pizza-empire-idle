@@ -1,34 +1,21 @@
 "use client";
 
 import React, { useState } from "react";
+import { CloseIcon, SoundIcon, MuteIcon, TrashIcon, WarningIcon, PizzaIcon } from "./Icons";
 
-interface SettingsModalProps {
+interface Props {
   muted: boolean;
   onToggleMute: () => void;
   onReset: () => void;
   onClose: () => void;
 }
 
-export default function SettingsModal({
-  muted,
-  onToggleMute,
-  onReset,
-  onClose,
-}: SettingsModalProps) {
+export default function SettingsModal({ muted, onToggleMute, onReset, onClose }: Props) {
   const [confirmReset, setConfirmReset] = useState(false);
-
-  const handleReset = () => {
-    if (confirmReset) {
-      onReset();
-      onClose();
-    } else {
-      setConfirmReset(true);
-    }
-  };
 
   return (
     <div
-      className="settings-overlay"
+      className="overlay-backdrop"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       role="dialog"
       aria-modal="true"
@@ -36,113 +23,104 @@ export default function SettingsModal({
     >
       <div className="settings-modal">
         {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <h2
-            className="text-xl font-bold text-neon"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            ⚙️ Settings
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", fontWeight: 700, color: "var(--c-cream)" }}>
+            Settings
           </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-cream/50 hover:text-cream hover:bg-white/10 transition-all text-lg"
-            aria-label="Close settings"
-          >
-            ✕
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <CloseIcon size={16} />
           </button>
         </div>
 
-        {/* Audio toggle */}
-        <div className="flex items-center justify-between py-3 border-b border-white/10">
+        {/* Sound toggle */}
+        <div className="settings-row">
           <div>
-            <div
-              className="text-sm font-semibold text-cream/90"
-              style={{ fontFamily: "var(--font-body)" }}
-            >
-              {muted ? "🔇 Sound Off" : "🔊 Sound On"}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+              {muted ? <MuteIcon size={15} color="var(--c-dim)" /> : <SoundIcon size={15} color="var(--c-cream)" />}
+              <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--c-cream)" }}>
+                Sound {muted ? "Off" : "On"}
+              </span>
             </div>
-            <div className="text-xs text-cream/40 mt-0.5" style={{ fontFamily: "var(--font-body)" }}>
+            <p style={{ fontSize: "0.68rem", color: "var(--c-dim)" }}>
               Toggle all game audio
-            </div>
+            </p>
           </div>
-          <label className="toggle-switch" aria-label="Toggle sound">
-            <input
-              type="checkbox"
-              checked={!muted}
-              onChange={onToggleMute}
-            />
-            <span className="toggle-slider" />
+          <label className="toggle" aria-label="Toggle sound">
+            <input type="checkbox" checked={!muted} onChange={onToggleMute} />
+            <div className="toggle-track">
+              <div className="toggle-thumb" />
+            </div>
           </label>
         </div>
 
-        {/* Version info */}
-        <div className="py-3 border-b border-white/10">
-          <div
-            className="text-xs text-cream/30"
-            style={{ fontFamily: "var(--font-body)" }}
-          >
-            🍕 Pizza Empire v1.0 — Idle Tycoon
-          </div>
-          <div
-            className="text-xs text-cream/25 mt-1"
-            style={{ fontFamily: "var(--font-body)" }}
-          >
-            Your progress saves automatically every 30 seconds.
-          </div>
-        </div>
-
         {/* How to play */}
-        <div className="py-3 border-b border-white/10">
-          <div
-            className="text-xs font-semibold text-cream/60 mb-2"
-            style={{ fontFamily: "var(--font-body)" }}
-          >
-            How to Play
+        <div className="settings-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <PizzaIcon size={15} color="var(--c-gold)" />
+            <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--c-cream)" }}>
+              How to Play
+            </span>
           </div>
-          <ul
-            className="text-xs text-cream/40 space-y-1"
-            style={{ fontFamily: "var(--font-body)" }}
-          >
-            <li>🍕 Click the pizza to earn coins</li>
-            <li>🔧 Buy upgrades to increase earnings</li>
-            <li>👥 Hire staff for passive income</li>
-            <li>🏆 Unlock milestones to grow your empire</li>
-            <li>⏰ Earn coins even when you&apos;re away (up to 4h)</li>
+          <ul style={{ fontSize: "0.7rem", color: "var(--c-dim)", lineHeight: 1.7, paddingLeft: 4 }}>
+            <li>Click the pizza to earn coins</li>
+            <li>Buy upgrades (left panel) to increase earnings</li>
+            <li>Hire staff (right panel) for automatic income</li>
+            <li>Unlock milestones as your empire grows</li>
+            <li>Earn coins passively while you are away (up to 4h)</li>
           </ul>
         </div>
 
+        {/* Save info */}
+        <div className="settings-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+          <span style={{ fontSize: "0.72rem", color: "var(--c-dim)" }}>
+            Progress auto-saves every 30 seconds and on window close.
+          </span>
+          <span style={{ fontSize: "0.65rem", color: "var(--c-ghost)" }}>
+            Pizza Empire v1.0
+          </span>
+        </div>
+
         {/* Reset */}
-        <div className="pt-4">
+        <div style={{ marginTop: 16 }}>
           {confirmReset ? (
-            <div className="text-center">
-              <p
-                className="text-sm text-red-300 mb-3"
-                style={{ fontFamily: "var(--font-body)" }}
-              >
-                ⚠️ This will permanently delete all progress!
-              </p>
-              <div className="flex gap-2 justify-center">
-                <button
-                  className="btn-danger"
-                  onClick={handleReset}
-                >
-                  Yes, reset everything
+            <div style={{ textAlign: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 }}>
+                <WarningIcon size={16} color="#ff8888" />
+                <span style={{ fontSize: "0.78rem", color: "#ff8888" }}>
+                  This will permanently delete all progress.
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <button className="btn btn-danger" onClick={() => { onReset(); onClose(); }}>
+                  Reset Everything
                 </button>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setConfirmReset(false)}
-                >
+                <button className="btn btn-ghost" onClick={() => setConfirmReset(false)}>
                   Cancel
                 </button>
               </div>
             </div>
           ) : (
             <button
-              className="w-full text-xs text-cream/25 hover:text-red-400 transition-colors py-2"
-              onClick={handleReset}
-              style={{ fontFamily: "var(--font-body)" }}
+              style={{
+                width: "100%",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                padding: "8px",
+                color: "var(--c-ghost)",
+                fontSize: "0.72rem",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#ff8888")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--c-ghost)")}
+              onClick={() => setConfirmReset(true)}
             >
-              🗑️ Reset Save Data
+              <TrashIcon size={13} />
+              Reset Save Data
             </button>
           )}
         </div>
